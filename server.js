@@ -125,7 +125,8 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
             // Get live quote of the ETF to scale the bracket order correctly
             let livePrice = 0;
             try {
-                const quoteResult = await yahooFinance.quote(symbol);
+                const yf = new yahooFinance();
+                const quoteResult = await yf.quote(symbol);
                 livePrice = quoteResult.regularMarketPrice || quoteResult.ask || quoteResult.bid;
             } catch (err) {
                 console.error(`[ALPACA] Failed to fetch live quote for ${symbol}:`, err.message);
