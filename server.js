@@ -186,7 +186,7 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 ? (process.env.ALPACA_ES_SYMBOL || "SPY")
                 : (process.env.ALPACA_NQ_SYMBOL || "QQQ");
 
-            let qty = parseInt(process.env.ALPACA_ORDER_QTY || "10"); // Defaults to 10 shares
+
             const environment = process.env.ALPACA_ENVIRONMENT || "PAPER";
             const baseUrl = environment.toUpperCase() === "LIVE" 
                 ? "api.alpaca.markets" 
@@ -261,54 +261,57 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 limitPrice = livePrice - 2.0 * (stopPrice - livePrice);
             }
 
-            // Fetch account equity from Alpaca to calculate dynamic risk quantity
-            const riskPctStr = process.env.ALPACA_RISK_PCT || "1"; // Default 1%
-            const riskPct = parseFloat(riskPctStr) / 100;
+            // Dynamic Position Sizing (Risk Percentage Sizing)
+            let qty = parseInt(process.env.ALPACA_ORDER_QTY || "10"); // Fallback
+            const riskStyle = process.env.ALPACA_RISK_STYLE || "FIXED";
+            const riskPct = parseFloat(process.env.ALPACA_RISK_PCT || "1.0");
 
-            console.log(`[ALPACA] Fetching account equity to scale dynamic ${riskPctStr}% risk...`);
-            try {
-                const accountData = await new Promise((resolveAcc, rejectAcc) => {
-                    const reqAcc = https.request({
-                        hostname: baseUrl,
-                        port: 443,
-                        path: '/v2/account',
-                        method: 'GET',
-                        headers: {
-                            'APCA-API-KEY-ID': apiKey,
-                            'APCA-API-SECRET-KEY': apiSecret,
-                            'Accept': 'application/json'
-                        }
-                    }, (resAcc) => {
-                        let bodyAcc = '';
-                        resAcc.on('data', chunk => bodyAcc += chunk);
-                        resAcc.on('end', () => {
-                            try {
-                                if (resAcc.statusCode !== 200) {
-                                    return rejectAcc(new Error(`Status ${resAcc.statusCode}: ${bodyAcc}`));
-                                }
-                                resolveAcc(JSON.parse(bodyAcc));
-                            } catch (e) {
-                                rejectAcc(e);
+            if (riskStyle.toUpperCase() === "PERCENT") {
+                console.log(`[ALPACA] Fetching account equity for dynamic ${riskPct}% risk calculation...`);
+                try {
+                    const equity = await new Promise((resolveAccount, rejectAccount) => {
+                        const reqAccount = https.request({
+                            hostname: baseUrl,
+                            port: 443,
+                            path: '/v2/account',
+                            method: 'GET',
+                            headers: {
+                                'APCA-API-KEY-ID': apiKey,
+                                'APCA-API-SECRET-KEY': apiSecret,
+                                'Accept': 'application/json'
                             }
+                        }, (resAccount) => {
+                            let bodyAccount = '';
+                            resAccount.on('data', chunk => bodyAccount += chunk);
+                            resAccount.on('end', () => {
+                                try {
+                                    if (resAccount.statusCode !== 200) {
+                                        return rejectAccount(new Error(`Status ${resAccount.statusCode}: ${bodyAccount}`));
+                                    }
+                                    const dataAccount = JSON.parse(bodyAccount);
+                                    resolveAccount(parseFloat(dataAccount.equity));
+                                } catch (e) {
+                                    rejectAccount(e);
+                                }
+                            });
                         });
+                        reqAccount.on('error', (errAccount) => {
+                            rejectAccount(errAccount);
+                        });
+                        reqAccount.end();
                     });
-                    reqAcc.on('error', (errAcc) => {
-                        rejectAcc(errAcc);
-                    });
-                    reqAcc.end();
-                });
 
-                const equity = parseFloat(accountData.equity);
-                if (equity && equity > 0) {
-                    const priceRisk = Math.abs(livePrice - stopPrice);
-                    if (priceRisk > 0) {
-                        const calculatedQty = Math.floor((equity * riskPct) / priceRisk);
-                        qty = Math.max(1, calculatedQty);
-                        console.log(`[ALPACA] Dynamic Risk Calculation: Equity $${equity.toFixed(2)} | Risk Per Share $${priceRisk.toFixed(2)} | Target Qty: ${qty} shares (Risk: ${riskPctStr}%)`);
+                    if (equity && equity > 0) {
+                        const priceDistance = Math.abs(livePrice - stopPrice);
+                        if (priceDistance > 0) {
+                            const riskCapital = equity * (riskPct / 100);
+                            qty = Math.max(1, Math.floor(riskCapital / priceDistance));
+                            console.log(`[ALPACA] Dynamic position sizing calculated: Equity $${equity.toFixed(2)}, Risk Capital $${riskCapital.toFixed(2)}, Stop Distance $${priceDistance.toFixed(2)} -> Qty ${qty} shares.`);
+                        }
                     }
+                } catch (errAccount) {
+                    console.error("[ALPACA] Failed to fetch account equity for dynamic sizing, falling back to fixed qty:", errAccount.message);
                 }
-            } catch (errAcc) {
-                console.warn(`[ALPACA] Dynamic risk calculation failed (falling back to fixed qty ${qty} shares):`, errAcc.message);
             }
 
             const isRegular = isRegularMarketHours();
