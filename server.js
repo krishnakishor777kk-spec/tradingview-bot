@@ -93,6 +93,22 @@ function sendTelegramNotification(message) {
     req.end();
 }
 
+// Helper to check if current time is within Regular US Stock Market Hours (9:30 AM - 4:00 PM EST, Mon-Fri)
+function isRegularMarketHours() {
+    const nycTime = moment().tz("America/New_York");
+    const day = nycTime.day(); // 0 = Sunday, 6 = Saturday
+    const hour = nycTime.hour();
+    const minute = nycTime.minute();
+    
+    if (day === 0 || day === 6) return false; // Weekend
+    
+    const minutesSinceMidnight = hour * 60 + minute;
+    const marketOpen = 9 * 60 + 30;  // 9:30 AM (570 minutes)
+    const marketClose = 16 * 60;     // 4:00 PM (960 minutes)
+    
+    return minutesSinceMidnight >= marketOpen && minutesSinceMidnight < marketClose;
+}
+
 // ==========================================================================
 // ALPACA AUTOMATED PAPER TRADING ENGINE (SPY & QQQ ETFs)
 // ==========================================================================
@@ -104,6 +120,13 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
 
             if (!apiKey || !apiSecret) {
                 // Silence if no Alpaca keys configured (perfect for local testing safety)
+                return resolve(null);
+            }
+
+            const bypassHours = process.env.ALPACA_BYPASS_HOURS === 'true';
+            if (!isRegularMarketHours() && !bypassHours) {
+                console.log(`[ALPACA] Execution skipped: Current time is outside regular US market hours.`);
+                sendTelegramNotification(`ℹ️ *ALPACA EXECUTION SKIPPED* ℹ️\nSetup detected outside regular market hours. Trade was not placed to prevent opening gap risk.`);
                 return resolve(null);
             }
 
