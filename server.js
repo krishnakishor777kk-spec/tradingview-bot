@@ -120,14 +120,46 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 ? "api.alpaca.markets" 
                 : "paper-api.alpaca.markets";
 
-            console.log(`[ALPACA] Fetching current live market quote for ${symbol} via Yahoo Finance...`);
+            console.log(`[ALPACA] Fetching current live market quote for ${symbol} via Alpaca API...`);
             
-            // Get live quote of the ETF to scale the bracket order correctly
+            // Get live quote of the ETF to scale the bracket order correctly using Alpaca's own stock quote API
             let livePrice = 0;
             try {
-                const yf = new yahooFinance();
-                const quoteResult = await yf.quote(symbol);
-                livePrice = quoteResult.regularMarketPrice || quoteResult.ask || quoteResult.bid;
+                livePrice = await new Promise((resolveQuote, rejectQuote) => {
+                    const reqQuote = https.request({
+                        hostname: 'data.alpaca.markets',
+                        port: 443,
+                        path: `/v2/stocks/${symbol}/quotes/latest`,
+                        method: 'GET',
+                        headers: {
+                            'APCA-API-KEY-ID': apiKey,
+                            'APCA-API-SECRET-KEY': apiSecret,
+                            'Accept': 'application/json'
+                        }
+                    }, (resQuote) => {
+                        let bodyQuote = '';
+                        resQuote.on('data', chunk => bodyQuote += chunk);
+                        resQuote.on('end', () => {
+                            try {
+                                if (resQuote.statusCode !== 200) {
+                                    return rejectQuote(new Error(`Status ${resQuote.statusCode}: ${bodyQuote}`));
+                                }
+                                const dataQuote = JSON.parse(bodyQuote);
+                                if (!dataQuote.quote) {
+                                    return rejectQuote(new Error(`No quote data in response: ${bodyQuote}`));
+                                }
+                                const price = dataQuote.quote.ap || dataQuote.quote.bp || 0;
+                                resolveQuote(price);
+                            } catch (e) {
+                                rejectQuote(e);
+                            }
+                        });
+                    });
+                    reqQuote.on('error', (errQuote) => {
+                        rejectQuote(errQuote);
+                    });
+                    reqQuote.end();
+                });
             } catch (err) {
                 console.error(`[ALPACA] Failed to fetch live quote for ${symbol}:`, err.message);
                 sendTelegramNotification(`⚠️ *ALPACA EXECUTION FAILED!* ⚠️\nFailed to fetch current price of ${symbol}.`);
