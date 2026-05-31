@@ -162,7 +162,7 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 });
             } catch (err) {
                 console.error(`[ALPACA] Failed to fetch live quote for ${symbol}:`, err.message);
-                sendTelegramNotification(`⚠️ *ALPACA EXECUTION FAILED!* ⚠️\nFailed to fetch current price of ${symbol}.`);
+                sendTelegramNotification(`⚠️ *ALPACA EXECUTION FAILED!* ⚠️\nFailed to fetch current price of ${symbol}.\nReason: ${err.message}`);
                 return resolve(null);
             }
 
