@@ -29,6 +29,60 @@ if (!fs.existsSync(ALERTS_FILE)) {
     fs.writeFileSync(ALERTS_FILE, JSON.stringify([], null, 2));
 }
 
+const JOURNAL_CSV = path.join(__dirname, 'trades_journal.csv');
+
+function syncCSVJournal() {
+    try {
+        const alerts = JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8'));
+        
+        let csvContent = "Date (EST),Asset,Alpaca Symbol,Action,Signal Price,Entry Price,Stop Loss,Target (1:2),Target (ERL),Risk,Status / Outcome,R-Multiple\n";
+        
+        alerts.forEach(a => {
+            const isES = a.ticker.toUpperCase().startsWith("ES");
+            const etfSymbol = isES ? (process.env.ALPACA_ES_SYMBOL || "SPY") : (process.env.ALPACA_NQ_SYMBOL || "QQQ");
+            
+            // Clean up status for presentation
+            const status = a.status || "ACTIVE";
+            let rMultiple = "0.0";
+            if (status.includes("WIN")) {
+                rMultiple = "+2.0";
+            } else if (status.includes("LOSS")) {
+                rMultiple = "-1.0";
+            } else if (status.includes("EOW CLOSE")) {
+                // Extract R-multiple if it is an end-of-week close
+                const match = status.match(/(-?\d+\.\d+)R/);
+                if (match) rMultiple = match[1];
+            }
+            
+            // Escape values for CSV safety
+            const row = [
+                a.date,
+                a.ticker,
+                etfSymbol,
+                a.action,
+                (a.signalPrice || 0).toFixed(2),
+                (a.entryPrice || 0).toFixed(2),
+                (a.stopLoss || 0).toFixed(2),
+                (a.target_12 || 0).toFixed(2),
+                (a.target_erl || 0).toFixed(2),
+                (a.risk || 0).toFixed(2),
+                `"${status}"`,
+                rMultiple
+            ];
+            
+            csvContent += row.join(",") + "\n";
+        });
+        
+        fs.writeFileSync(JOURNAL_CSV, csvContent, 'utf8');
+        console.log(`[JOURNAL] Successfully synced ${alerts.length} trades to Excel-compatible trades_journal.csv`);
+    } catch (err) {
+        console.error("[JOURNAL] Failed to sync CSV journal:", err.message);
+    }
+}
+
+// Initial sync on startup
+syncCSVJournal();
+
 // SSE Clients list for real-time forward broadcast
 let sseClients = [];
 
@@ -798,6 +852,7 @@ async function pollLiveScanner() {
 
                         alerts.unshift(newAlert);
                         fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
+                        syncCSVJournal();
                         console.log(`\n>>> [LIVE SCANNER DETECTED NEW 90M BULLISH SWEEP]:`, newAlert);
                         
                         // Trigger automated Alpaca execution in background
@@ -869,6 +924,7 @@ async function pollLiveScanner() {
 
                         alerts.unshift(newAlert);
                         fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
+                        syncCSVJournal();
                         console.log(`\n>>> [LIVE SCANNER DETECTED NEW 90M BEARISH SWEEP]:`, newAlert);
                         
                         // Trigger automated Alpaca execution in background
@@ -936,6 +992,7 @@ async function pollLiveScanner() {
 
         if (listChanged) {
             fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
+            syncCSVJournal();
         }
 
     } catch (err) {
@@ -1105,6 +1162,7 @@ const server = http.createServer((req, res) => {
                 const alerts = JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8'));
                 alerts.unshift(parsedAlert);
                 fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
+                syncCSVJournal();
 
                 // Trigger automated Alpaca execution in background
                 executeAlpacaOrder(ticker.split('=')[0].toUpperCase(), action, entryPrice, stopLoss, target_12);
