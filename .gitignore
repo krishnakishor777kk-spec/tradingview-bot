@@ -1,0 +1,15 @@
+# Dependency directories
+node_modules/
+
+# Local environment secret variables
+.env
+
+# Local simulated trade data
+alerts.json
+
+# Temporary downloads and data
+downloads/
+
+# Log files
+*.log
+.system_generated/
