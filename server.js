@@ -186,7 +186,7 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 ? (process.env.ALPACA_ES_SYMBOL || "SPY")
                 : (process.env.ALPACA_NQ_SYMBOL || "QQQ");
 
-            const qty = parseInt(process.env.ALPACA_ORDER_QTY || "10"); // Defaults to 10 shares
+            let qty = parseInt(process.env.ALPACA_ORDER_QTY || "10"); // Defaults to 10 shares
             const environment = process.env.ALPACA_ENVIRONMENT || "PAPER";
             const baseUrl = environment.toUpperCase() === "LIVE" 
                 ? "api.alpaca.markets" 
@@ -259,6 +259,56 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 stopPrice = livePrice * (1 + pctRisk);
                 // 1:2 R:R bracket
                 limitPrice = livePrice - 2.0 * (stopPrice - livePrice);
+            }
+
+            // Fetch account equity from Alpaca to calculate dynamic risk quantity
+            const riskPctStr = process.env.ALPACA_RISK_PCT || "1"; // Default 1%
+            const riskPct = parseFloat(riskPctStr) / 100;
+
+            console.log(`[ALPACA] Fetching account equity to scale dynamic ${riskPctStr}% risk...`);
+            try {
+                const accountData = await new Promise((resolveAcc, rejectAcc) => {
+                    const reqAcc = https.request({
+                        hostname: baseUrl,
+                        port: 443,
+                        path: '/v2/account',
+                        method: 'GET',
+                        headers: {
+                            'APCA-API-KEY-ID': apiKey,
+                            'APCA-API-SECRET-KEY': apiSecret,
+                            'Accept': 'application/json'
+                        }
+                    }, (resAcc) => {
+                        let bodyAcc = '';
+                        resAcc.on('data', chunk => bodyAcc += chunk);
+                        resAcc.on('end', () => {
+                            try {
+                                if (resAcc.statusCode !== 200) {
+                                    return rejectAcc(new Error(`Status ${resAcc.statusCode}: ${bodyAcc}`));
+                                }
+                                resolveAcc(JSON.parse(bodyAcc));
+                            } catch (e) {
+                                rejectAcc(e);
+                            }
+                        });
+                    });
+                    reqAcc.on('error', (errAcc) => {
+                        rejectAcc(errAcc);
+                    });
+                    reqAcc.end();
+                });
+
+                const equity = parseFloat(accountData.equity);
+                if (equity && equity > 0) {
+                    const priceRisk = Math.abs(livePrice - stopPrice);
+                    if (priceRisk > 0) {
+                        const calculatedQty = Math.floor((equity * riskPct) / priceRisk);
+                        qty = Math.max(1, calculatedQty);
+                        console.log(`[ALPACA] Dynamic Risk Calculation: Equity $${equity.toFixed(2)} | Risk Per Share $${priceRisk.toFixed(2)} | Target Qty: ${qty} shares (Risk: ${riskPctStr}%)`);
+                    }
+                }
+            } catch (errAcc) {
+                console.warn(`[ALPACA] Dynamic risk calculation failed (falling back to fixed qty ${qty} shares):`, errAcc.message);
             }
 
             const isRegular = isRegularMarketHours();
