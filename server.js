@@ -93,6 +93,230 @@ function sendTelegramNotification(message) {
     req.end();
 }
 
+// ==========================================================================
+// TRADOVATE AUTOMATED PAPER TRADING ENGINE (MICRO CONTRACTS MES & MNQ)
+// ==========================================================================
+let cachedTradovateToken = null;
+let tradovateTokenExpiration = 0;
+
+function getTradovateToken() {
+    return new Promise((resolve, reject) => {
+        const username = process.env.TRADOVATE_USER;
+        const password = process.env.TRADOVATE_PASS;
+        const appId = process.env.TRADOVATE_APP_ID || "TradingViewBot";
+        const appVersion = process.env.TRADOVATE_APP_VERSION || "1.0";
+        const cid = process.env.TRADOVATE_CID;
+        const sec = process.env.TRADOVATE_SEC;
+
+        if (!username || !password) {
+            // Silence if no Tradovate credentials configured
+            return resolve(null);
+        }
+
+        if (cachedTradovateToken && Date.now() < tradovateTokenExpiration - 60000) {
+            return resolve(cachedTradovateToken);
+        }
+
+        console.log("[TRADOVATE] Requesting new access token...");
+        const isLive = process.env.TRADOVATE_ENVIRONMENT === 'LIVE';
+        const baseUrl = isLive ? 'live.tradovateapi.com' : 'demo.tradovateapi.com';
+        
+        const payloadObj = {
+            name: username,
+            password: password,
+            appId: appId,
+            appVersion: appVersion
+        };
+        if (cid) payloadObj.cid = parseInt(cid);
+        if (sec) payloadObj.sec = sec;
+
+        const payload = JSON.stringify(payloadObj);
+
+        const req = https.request({
+            hostname: baseUrl,
+            port: 443,
+            path: '/v1/auth/accesstokenrequest',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload)
+            }
+        }, (res) => {
+            let body = '';
+            res.on('data', chunk => body += chunk);
+            res.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    if (res.statusCode !== 200) {
+                        return reject(new Error(data.errorText || `HTTP ${res.statusCode}: ${body}`));
+                    }
+                    if (!data.accessToken) {
+                        return reject(new Error("No access token returned from Tradovate."));
+                    }
+                    cachedTradovateToken = data.accessToken;
+                    if (data.expirationTime) {
+                        tradovateTokenExpiration = new Date(data.expirationTime).getTime();
+                    } else {
+                        tradovateTokenExpiration = Date.now() + 6 * 60 * 60 * 1000;
+                    }
+                    console.log("[TRADOVATE] Successfully authenticated and retrieved access token.");
+                    resolve(cachedTradovateToken);
+                } catch (err) {
+                    reject(new Error("Failed to parse Tradovate auth response: " + err.message));
+                }
+            });
+        });
+
+        req.on('error', (err) => {
+            reject(new Error("Tradovate auth network error: " + err.message));
+        });
+
+        req.write(payload);
+        req.end();
+    });
+}
+
+function getTradovateSymbol(ticker) {
+    const isES = ticker.toUpperCase().startsWith("ES");
+    const isNQ = ticker.toUpperCase().startsWith("NQ");
+
+    if (isES && process.env.TRADOVATE_ES_SYMBOL) return process.env.TRADOVATE_ES_SYMBOL;
+    if (isNQ && process.env.TRADOVATE_NQ_SYMBOL) return process.env.TRADOVATE_NQ_SYMBOL;
+
+    const baseCode = isES ? "MES" : "MNQ";
+
+    const now = new Date();
+    const month = now.getMonth(); 
+    const day = now.getDate();
+
+    let monthCode = "H";
+    let year = now.getFullYear();
+
+    if ((month === 11 && day >= 16) || month === 0 || month === 1 || (month === 2 && day <= 15)) {
+        monthCode = "H";
+        if (month === 11) year += 1;
+    } else if ((month === 2 && day >= 16) || month === 3 || month === 4 || (month === 5 && day <= 15)) {
+        monthCode = "M";
+    } else if ((month === 5 && day >= 16) || month === 6 || month === 7 || (month === 8 && day <= 15)) {
+        monthCode = "U";
+    } else if ((month === 8 && day >= 16) || month === 9 || month === 10 || (month === 11 && day <= 15)) {
+        monthCode = "Z";
+    }
+
+    const yearChar = String(year).slice(-1);
+    return `${baseCode}${monthCode}${yearChar}`;
+}
+
+function executeTradovateOrder(ticker, action, entryPrice, stopLoss, target_12) {
+    return new Promise(async (resolve) => {
+        try {
+            const token = await getTradovateToken();
+            if (!token) {
+                return resolve(null); // Skip silently if API is not configured
+            }
+
+            const accountSpec = process.env.TRADOVATE_ACCOUNT_SPEC;
+            const accountIdStr = process.env.TRADOVATE_ACCOUNT_ID;
+
+            if (!accountSpec || !accountIdStr) {
+                console.error("[TRADOVATE] Missing TRADOVATE_ACCOUNT_SPEC or TRADOVATE_ACCOUNT_ID in environment variables.");
+                sendTelegramNotification("⚠️ *TRADOVATE EXECUTION FAILED!* ⚠️\nMissing Account Spec or Account ID in Render secrets.");
+                return resolve(null);
+            }
+
+            const accountId = parseInt(accountIdStr);
+            const symbol = getTradovateSymbol(ticker);
+            const qty = parseInt(process.env.TRADOVATE_ORDER_QTY || "1");
+
+            const isLive = process.env.TRADOVATE_ENVIRONMENT === 'LIVE';
+            const baseUrl = isLive ? 'live.tradovateapi.com' : 'demo.tradovateapi.com';
+
+            const exitAction = action === 'BUY' ? 'Sell' : 'Buy';
+            const entryAction = action === 'BUY' ? 'Buy' : 'Sell';
+
+            // OSO Bracket Order Payload (1 entry + 2 exit brackets)
+            const payloadObj = {
+                accountSpec,
+                accountId,
+                symbol,
+                action: entryAction,
+                orderType: "Market",
+                orderQty: qty,
+                isAutomated: true,
+                bracket1: {
+                    action: exitAction,
+                    orderType: "Stop",
+                    stopPrice: parseFloat(stopLoss.toFixed(2))
+                },
+                bracket2: {
+                    action: exitAction,
+                    orderType: "Limit",
+                    price: parseFloat(target_12.toFixed(2))
+                }
+            };
+
+            const payload = JSON.stringify(payloadObj);
+            console.log(`[TRADOVATE] Sending OSO Order request to ${symbol}:`, payloadObj);
+
+            const req = https.request({
+                hostname: baseUrl,
+                port: 443,
+                path: '/v1/order/placeOSO',
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload)
+                }
+            }, (res) => {
+                let body = '';
+                res.on('data', chunk => body += chunk);
+                res.on('end', () => {
+                    try {
+                        const data = JSON.parse(body);
+                        if (res.statusCode !== 200) {
+                            console.error("[TRADOVATE] Execution Error:", data.errorText || body);
+                            sendTelegramNotification(`⚠️ *TRADOVATE EXECUTION FAILED!* ⚠️\n\n📈 *Asset*: ${ticker} (${symbol})\n⚡ *Action*: ${action}\n❌ *Reason*: ${data.errorText || body}`);
+                            return resolve(null);
+                        }
+
+                        console.log("[TRADOVATE] Order placed successfully:", data);
+                        sendTelegramNotification(
+                            `🚀 *AUTOMATED TRADOVATE TRADE PLACED!* 🚀\n\n` +
+                            `📈 *Asset*: ${symbol} (${ticker})\n` +
+                            `⚡ *Action*: ${action} (Market Entry)\n` +
+                            `📦 *Size*: ${qty} Contract(s)\n` +
+                            `🎯 *Entry Level*: (Filled at Market)\n` +
+                            `🛡️ *Stop Loss Bracket*: ${payloadObj.bracket1.stopPrice.toFixed(2)}\n` +
+                            `🟢 *Model A Target Bracket*: ${payloadObj.bracket2.price.toFixed(2)}\n\n` +
+                            `📱 Position is live and managed in your Tradovate account.`
+                        );
+                        resolve(data);
+                    } catch (err) {
+                        console.error("[TRADOVATE] Parsing error:", err.message);
+                        sendTelegramNotification(`⚠️ *TRADOVATE API ERROR!* ⚠️\nParsing error: ${err.message}`);
+                        resolve(null);
+                    }
+                });
+            });
+
+            req.on('error', (err) => {
+                console.error("[TRADOVATE] Network error:", err.message);
+                sendTelegramNotification(`⚠️ *TRADOVATE NETWORK ERROR!* ⚠️\nNetwork error: ${err.message}`);
+                resolve(null);
+            });
+
+            req.write(payload);
+            req.end();
+
+        } catch (err) {
+            console.error("[TRADOVATE] Unexpected Error in order execution:", err.message);
+            sendTelegramNotification(`⚠️ *TRADOVATE EXECUTION EXCEPTION!* ⚠️\nError: ${err.message}`);
+            resolve(null);
+        }
+    });
+}
+
 // Global Institutional Quarters helper (4 Sessions * 4 Quarters * 90M)
 function getInstitutionalQuarter(timestamp) {
     const m = moment(timestamp).tz("America/New_York");
@@ -578,6 +802,9 @@ async function pollLiveScanner() {
                         fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
                         console.log(`\n>>> [LIVE SCANNER DETECTED NEW 90M BULLISH SWEEP]:`, newAlert);
                         
+                        // Trigger automated Tradovate execution in background
+                        executeTradovateOrder(failureAsset.toUpperCase(), "BUY", entryPrice, stopLoss, target_12);
+
                         // Send Telegram message
                         const msg = `🚨 *NEW 90M INTRADAY BULLISH SWEEP!* 🚨\n\n` +
                                     `📈 *Asset*: ${failureAsset.toUpperCase()}=F\n` +
@@ -646,6 +873,9 @@ async function pollLiveScanner() {
                         fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
                         console.log(`\n>>> [LIVE SCANNER DETECTED NEW 90M BEARISH SWEEP]:`, newAlert);
                         
+                        // Trigger automated Tradovate execution in background
+                        executeTradovateOrder(failureAsset.toUpperCase(), "SELL", entryPrice, stopLoss, target_12);
+
                         // Send Telegram message
                         const msg = `🚨 *NEW 90M INTRADAY BEARISH SWEEP!* 🚨\n\n` +
                                     `📈 *Asset*: ${failureAsset.toUpperCase()}=F\n` +
@@ -877,6 +1107,9 @@ const server = http.createServer((req, res) => {
                 const alerts = JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8'));
                 alerts.unshift(parsedAlert);
                 fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
+
+                // Trigger automated Tradovate execution in background
+                executeTradovateOrder(ticker.split('=')[0].toUpperCase(), action, entryPrice, stopLoss, target_12);
 
                 // Send Telegram Notification
                 const msg = `🚨 *TRADINGVIEW WEBHOOK SIGNAL RECEIVED!* 🚨\n\n` +
