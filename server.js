@@ -123,12 +123,7 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 return resolve(null);
             }
 
-            const bypassHours = process.env.ALPACA_BYPASS_HOURS === 'true';
-            if (!isRegularMarketHours() && !bypassHours) {
-                console.log(`[ALPACA] Execution skipped: Current time is outside regular US market hours.`);
-                sendTelegramNotification(`ℹ️ *ALPACA EXECUTION SKIPPED* ℹ️\nSetup detected outside regular market hours. Trade was not placed to prevent opening gap risk.`);
-                return resolve(null);
-            }
+            // We proceed with the order. If it's overnight/extended hours, we will use a Limit order with no brackets.
 
             const isES = ticker.toUpperCase().startsWith("ES");
             const isNQ = ticker.toUpperCase().startsWith("NQ");
@@ -212,20 +207,33 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                 limitPrice = livePrice - 2.0 * (stopPrice - livePrice);
             }
 
+            const isRegular = isRegularMarketHours();
+            const bypassHours = process.env.ALPACA_BYPASS_HOURS === 'true';
+            
             const payloadObj = {
                 symbol: symbol,
                 qty: String(qty),
                 side: action.toLowerCase(), // "buy" or "sell"
-                type: "market",
-                time_in_force: "gtc",
-                order_class: "bracket",
-                take_profit: {
-                    limit_price: String(parseFloat(limitPrice.toFixed(2)))
-                },
-                stop_loss: {
-                    stop_price: String(parseFloat(stopPrice.toFixed(2)))
-                }
+                time_in_force: "gtc"
             };
+
+            if (isRegular || bypassHours) {
+                // Regular hours: Standard bracket order
+                payloadObj.type = "market";
+                payloadObj.order_class = "bracket";
+                payloadObj.take_profit = {
+                    limit_price: String(parseFloat(limitPrice.toFixed(2)))
+                };
+                payloadObj.stop_loss = {
+                    stop_price: String(parseFloat(stopPrice.toFixed(2)))
+                };
+            } else {
+                // Extended/Overnight hours: Limit order with no brackets (manual stop loss placement)
+                payloadObj.type = "limit";
+                payloadObj.limit_price = String(parseFloat(livePrice.toFixed(2)));
+                payloadObj.extended_hours = true;
+                payloadObj.order_class = "simple";
+            }
 
             const payload = JSON.stringify(payloadObj);
             console.log(`[ALPACA] Sending Bracket Order payload to ${symbol}:`, payloadObj);
@@ -259,16 +267,28 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                         }
 
                         console.log("[ALPACA] Order executed successfully:", data);
-                        sendTelegramNotification(
-                            `🚀 *AUTOMATED ALPACA TRADE PLACED!* 🚀\n\n` +
-                            `📈 *Asset*: ${symbol} (Scaled from ${ticker})\n` +
-                            `⚡ *Action*: ${action.toUpperCase()} (Market Entry)\n` +
-                            `📦 *Size*: ${qty} Shares\n` +
-                            `💵 *Estimated Entry*: $${livePrice.toFixed(2)}\n` +
-                            `🛡️ *Stop Loss Bracket*: $${stopPrice.toFixed(2)} (${(pctRisk * 100).toFixed(2)}% risk)\n` +
-                            `🟢 *Model A Target Bracket*: $${limitPrice.toFixed(2)}\n\n` +
-                            `📱 Position is live in your Alpaca simulation portfolio.`
-                        );
+                        if (isRegular || bypassHours) {
+                            sendTelegramNotification(
+                                `🚀 *AUTOMATED ALPACA TRADE PLACED!* 🚀\n\n` +
+                                `📈 *Asset*: ${symbol} (Scaled from ${ticker})\n` +
+                                `⚡ *Action*: ${action.toUpperCase()} (Market Entry)\n` +
+                                `📦 *Size*: ${qty} Shares\n` +
+                                `💵 *Estimated Entry*: $${livePrice.toFixed(2)}\n` +
+                                `🛡️ *Stop Loss Bracket*: $${stopPrice.toFixed(2)} (${(pctRisk * 100).toFixed(2)}% risk)\n` +
+                                `🟢 *Model A Target Bracket*: $${limitPrice.toFixed(2)}\n\n` +
+                                `📱 Position is live in your Alpaca simulation portfolio.`
+                            );
+                        } else {
+                            sendTelegramNotification(
+                                `🚀 *ALPACA OVERNIGHT TRADE PLACED!* 🚀\n\n` +
+                                `📈 *Asset*: ${symbol} (Scaled from ${ticker})\n` +
+                                `⚡ *Action*: ${action.toUpperCase()} (Limit Entry @ $${livePrice.toFixed(2)})\n` +
+                                `📦 *Size*: ${qty} Shares\n` +
+                                `⚠️ *Note*: Extended Hours active. Brackets are disabled on overnight entry.\n` +
+                                `🛡️ *Please manually place your Stop Loss at $${stopPrice.toFixed(2)}* on your Alpaca phone app!\n` +
+                                `🟢 *Please manually place your Target at $${limitPrice.toFixed(2)}*!`
+                            );
+                        }
                         resolve(data);
                     } catch (err) {
                         console.error("[ALPACA] Parsing error:", err.message);
