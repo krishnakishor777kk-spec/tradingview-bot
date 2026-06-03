@@ -267,9 +267,9 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
             const riskPct = parseFloat(process.env.ALPACA_RISK_PCT || "1.0");
 
             if (riskStyle.toUpperCase() === "PERCENT") {
-                console.log(`[ALPACA] Fetching account equity for dynamic ${riskPct}% risk calculation...`);
+                console.log(`[ALPACA] Fetching account equity and buying power for dynamic ${riskPct}% risk calculation...`);
                 try {
-                    const equity = await new Promise((resolveAccount, rejectAccount) => {
+                    const accInfo = await new Promise((resolveAccount, rejectAccount) => {
                         const reqAccount = https.request({
                             hostname: baseUrl,
                             port: 443,
@@ -289,7 +289,10 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                                         return rejectAccount(new Error(`Status ${resAccount.statusCode}: ${bodyAccount}`));
                                     }
                                     const dataAccount = JSON.parse(bodyAccount);
-                                    resolveAccount(parseFloat(dataAccount.equity));
+                                    resolveAccount({
+                                        equity: parseFloat(dataAccount.equity),
+                                        buyingPower: parseFloat(dataAccount.buying_power)
+                                    });
                                 } catch (e) {
                                     rejectAccount(e);
                                 }
@@ -301,16 +304,22 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
                         reqAccount.end();
                     });
 
-                    if (equity && equity > 0) {
+                    if (accInfo && accInfo.equity > 0) {
                         const priceDistance = Math.abs(livePrice - stopPrice);
                         if (priceDistance > 0) {
-                            const riskCapital = equity * (riskPct / 100);
-                            qty = Math.max(1, Math.floor(riskCapital / priceDistance));
-                            console.log(`[ALPACA] Dynamic position sizing calculated: Equity $${equity.toFixed(2)}, Risk Capital $${riskCapital.toFixed(2)}, Stop Distance $${priceDistance.toFixed(2)} -> Qty ${qty} shares.`);
+                            const riskCapital = accInfo.equity * (riskPct / 100);
+                            const calculatedQty = Math.floor(riskCapital / priceDistance);
+                            
+                            // Cap based on available buying power with a 5% safety margin
+                            const maxQty = Math.floor((accInfo.buyingPower * 0.95) / livePrice);
+                            
+                            qty = Math.max(1, Math.min(calculatedQty, maxQty));
+                            
+                            console.log(`[ALPACA] Dynamic position sizing: Equity $${accInfo.equity.toFixed(2)}, Buying Power $${accInfo.buyingPower.toFixed(2)}, Risk Capital $${riskCapital.toFixed(2)}, Stop Distance $${priceDistance.toFixed(2)} -> Calculated Qty: ${calculatedQty}, Capped Qty: ${qty} shares.`);
                         }
                     }
                 } catch (errAccount) {
-                    console.error("[ALPACA] Failed to fetch account equity for dynamic sizing, falling back to fixed qty:", errAccount.message);
+                    console.error("[ALPACA] Failed to fetch account information for dynamic sizing, falling back to fixed qty:", errAccount.message);
                 }
             }
 
