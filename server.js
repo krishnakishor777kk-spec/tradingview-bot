@@ -249,13 +249,16 @@ async function executeAlpacaOrder(ticker, action, entryPrice, stopLoss, target_1
             let limitPrice = 0;
             let pctRisk = 0;
 
+            // Enforce a minimum stop loss risk percentage (e.g. 0.12%) to prevent broker rejection of extremely tight stop loss legs
+            const MIN_RISK_PCT = 0.0012;
+
             if (action === 'BUY') {
-                pctRisk = (entryPrice - stopLoss) / entryPrice;
+                pctRisk = Math.max(MIN_RISK_PCT, (entryPrice - stopLoss) / entryPrice);
                 stopPrice = livePrice * (1 - pctRisk);
                 // 1:2 R:R bracket
                 limitPrice = livePrice + 2.0 * (livePrice - stopPrice);
             } else {
-                pctRisk = (stopLoss - entryPrice) / entryPrice;
+                pctRisk = Math.max(MIN_RISK_PCT, (stopLoss - entryPrice) / entryPrice);
                 stopPrice = livePrice * (1 + pctRisk);
                 // 1:2 R:R bracket
                 limitPrice = livePrice - 2.0 * (stopPrice - livePrice);
