@@ -1268,13 +1268,4 @@ server.listen(PORT, () => {
     console.log(`   -> Dashboard Server: http://localhost:${PORT}`);
     console.log(`   -> Webhook Endpoint: http://localhost:${PORT}/webhook`);
     console.log("==========================================================================");
-    
-    // Start the Telegram Agent Bot listener
-    try {
-        const telegramAgent = require('./telegram_agent');
-        telegramAgent.startPolling();
-        console.log("[AGENT] Telegram Active Assistant listener started successfully.");
-    } catch (err) {
-        console.error("[AGENT] Failed to start Telegram Active Assistant listener:", err.message);
-    }
 });
