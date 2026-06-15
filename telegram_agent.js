@@ -165,7 +165,7 @@ CURRENT STATE:
 Your tone should be professional, clear, and highly aligned with institutional trading concepts. Do not use standard retail trading slang.
 Keep responses concise since the user is reading this on a phone.`;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
     
     const payload = JSON.stringify({
         systemInstruction: {
