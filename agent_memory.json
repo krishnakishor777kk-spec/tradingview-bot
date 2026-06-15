@@ -1,0 +1,9 @@
+{
+  "lessons": [],
+  "customAlerts": [],
+  "activeTasks": {
+    "scan15mSSMT": false,
+    "scanDailyGap": false,
+    "customScanText": ""
+  }
+}

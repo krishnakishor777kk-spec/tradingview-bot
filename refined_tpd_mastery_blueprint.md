@@ -14,15 +14,13 @@ A Terminus Price Divergence (TPD) is a strictly time-locked, 3-candle algorithmi
 
 ---
 
-## 2. The Absolute CSD & Displacement Rule
-Displacement is the definitive confirmation of a Change in State of Delivery (CSD) in Candle 3. It is governed by an absolute, non-subjective mathematical rule:
+## 2. Reversion Level Entry Rule (No CSD Confirmation Wait)
+The Terminus Price Divergence (TPD) setup is executed strictly via limit orders at the mapped **Reversion Level**, without waiting for the 3-candle Change in State of Delivery (CSD) displacement close:
 
-* **Bullish CSD (Seeking Longs)**:
-  * **Rule**: Candle 3 **must close completely above the OPEN price (body)** of the previous bearish candle (Candle 2).
-  * **Wick Rule**: The high wick of Candle 2 is **ignored completely**. Only the body close matters.
-* **Bearish CSD (Seeking Shorts)**:
-  * **Rule**: Candle 3 **must close completely below the OPEN price (body)** of the previous bullish candle (Candle 2).
-  * **Wick Rule**: The low wick of Candle 2 is **ignored completely**. Only the body close matters.
+* **Execution Trigger**: Once Candle 2 (the sweep candle) closes, we immediately map the Reversion Level on the lower timeframe.
+* **Direct Entry**: Place a Limit Order at the Reversion Level. Candle 3 (or later candles) can tap and fill the entry during their formation.
+* **CSD Close Elimination**: We do **not** wait for Candle 3 to close above/below Candle 2's open to validate the trade.
+
 
 ---
 
@@ -66,12 +64,13 @@ The transition from your pre-market setup to session execution follows a highly 
   [Verify 90-Minute SSMT Sweep] ─────► At least 1 asset MUST close above the PSL
 ```
 
-1. **The Setup**: We identify an **8:00 AM H1 TPD** pre-market.
+1. **The Setup**: We identify an **8:00 AM H1 TPD** pre-market (Candle 1 and Candle 2).
 2. **The Level**: We zoom in to the 15-Minute timeframe and map the **15M Reversion Level** of Candle 2.
-3. **The Open**: We wait patiently for the **9:30 AM EST Equities Open**.
-4. **The Tap**: At the 9:30 AM open, price pulls back to tap our **15M Reversion Level**.
-5. **The Sweep (90M SSMT)**: At this exact tap, we watch the three indices (ES, NQ, YM). Some or all may sweep below the **Previous Session Low (PSL)**, but **at least one asset (the failure swing) must close above the PSL** to confirm the buy trigger.
-6. **Macro Alignment**: For a **6H TPD** or a **2:00 AM 4H TPD**, we map the **1-Hour Reversion Level (1H RL)** and wait for a **15-Minute SSMT** relative to the **London Session** high/low.
+3. **The Order**: Immediately upon Candle 2's close, we place a **Limit Buy/Sell Order** at the Reversion Level.
+4. **The Tap (Fill)**: At the 9:30 AM open, price pulls back and taps our Reversion Level, filling the limit order instantly. We do **not** wait for any candle close (neither the H1 Candle 3 close nor the 5-Minute sweep candle close) to validate the fill.
+5. **The Sweep (90M SSMT)**: We monitor the three indices (ES, NQ, YM) around the tap to verify the crack in correlation (SMT Divergence) confirming institutional involvement.
+6. **Macro Alignment**: For a **6H TPD** or a **2:00 AM 4H TPD**, we map the **1-Hour Reversion Level (1H RL)** and place our limit orders there, waiting for the London Session open windows to tap.
+
 
 ---
 
