@@ -407,11 +407,23 @@ module.exports = {
     askGemini
 };
 
-// If run directly, start polling
+// If run directly, start polling and bind to port for Render health checks
 if (require.main === module) {
     if (!BOT_TOKEN || !CHAT_ID) {
         console.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env!");
         process.exit(1);
     }
+
+    // Simple dummy server to pass Render health checks
+    const http = require('http');
+    const PORT = process.env.PORT || 3000;
+    const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Trading Assistant is Active and Scanning!');
+    });
+    server.listen(PORT, () => {
+        console.log(`[AGENT] Dummy HTTP server listening on port ${PORT}`);
+    });
+
     startPolling();
 }
