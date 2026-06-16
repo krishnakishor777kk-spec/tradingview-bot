@@ -740,8 +740,8 @@ async function checkAutomatedScans() {
             const bearishSMT = (esSweptH && !nqSweptH) || (nqSweptH && !esSweptH);
             
             if (bearishSMT) {
-                const failureAsset = nqSweptH ? "NQ" : "ES";
-                const sweeperAsset = nqSweptH ? "ES" : "NQ";
+                const failureAsset = nqSweptH ? "ES" : "NQ";
+                const sweeperAsset = nqSweptH ? "NQ" : "ES";
                 const setupKey = `BEARISH-SMT-${currentSessionKey}-${failureAsset}`;
                 
                 const smtDesc = `Bearish SMT: ${sweeperAsset} swept high (${(sweeperAsset === 'ES' ? prevSessionHighES : prevSessionHighNQ).toFixed(2)}), but ${failureAsset} failed.`;
