@@ -74,10 +74,10 @@ Sequential PD Arrays are arrays that form in the previous time segment/quarter/c
 
 | Cycle Type | Timeframe | Focus / Setup Conditions |
 | :--- | :--- | :--- |
-| **Monthly Cycle** | ➡️ **4-Hour (4H) Chart** | Used to evaluate the week. High probability setup occurs when we get an SSMT with the previous week confluenced with a **4H TPD**. |
-| **Weekly Cycle** | ➡️ **1-Hour (1H) Chart** | Used to evaluate daily behavior. Look for an SSMT between two days (e.g., Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, or Fri/Mon). High probability when confluenced with a **1H TPD** (but also works without it). |
-| **Daily Cycle** | ➡️ **15-Minute (15M) Chart** | Used for session-level setups. High probability setup occurs when we get an SSMT confluenced with a **15M TPD** (but also works without it). |
-| **90-Minute Cycle** | ➡️ **5-Minute (5M) Chart** | Used exclusively for the 90-minute session/quarter focus. |
+| **Monthly Cycle** | ➡️ **4-Hour (4H) Chart** | Used to evaluate the week. Look for an SSMT with the previous week. High probability when confluenced with a **4H TPD** (but works without it as well). |
+| **Weekly Cycle** | ➡️ **1-Hour (1H) Chart** | Used to evaluate daily behavior. Look for an SSMT between two days (e.g., Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, or Fri/Mon). High probability when confluenced with a **1H TPD** (but works without it as well). |
+| **Daily Cycle** | ➡️ **15-Minute (15M) Chart** | Used for session-level setups. Look for an SSMT between sessions/quarters. High probability when confluenced with a **15M TPD** (but works without it as well). |
+| **90-Minute Cycle** | ➡️ **5-Minute (5M) Chart** | Used exclusively for the 90-minute session/quarter focus. High probability when confluenced with a **5M TPD** (but works without it as well). |
 
 *   *Note:* The daily cycle and higher can be slightly skewed (details covered in specific live streams), but this hierarchy remains the core foundation. Over 90% of the presenter's high-precision trades are executed using this exact sequential PDA mapping.
 

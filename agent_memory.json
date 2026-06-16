@@ -1,9 +1,10 @@
 {
   "lessons": [
-    "Monthly Cycle: 4H timeframe to evaluate the week. High probability is SSMT with previous week confluenced with 4H TPD.",
-    "Weekly Cycle: 1H timeframe to evaluate daily behavior. Look for SSMT between two days (Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, Fri/Mon) confluenced with 1H TPD (works without too).",
-    "Daily Cycle: 15M timeframe for session-level setups (London, NY AM, NY PM, Asia). High probability is SSMT confluenced with 15M TPD (works without too).",
-    "90-Minute Cycle: 5M timeframe used exclusively for the 90-minute session/quarter focus."
+    "Monthly Cycle: 4H timeframe to evaluate the week. Look for SSMT with previous week. High probability confluenced with 4H TPD (works without TPD as well).",
+    "Weekly Cycle: 1H timeframe to evaluate daily behavior. Look for SSMT between two days (Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, Fri/Mon). High probability confluenced with 1H TPD (works without TPD as well).",
+    "Daily Cycle: 15M timeframe for session-level setups (London, NY AM, NY PM, Asia). Look for SSMT between sessions/quarters. High probability confluenced with 15M TPD (works without TPD as well).",
+    "90-Minute Cycle: 5M timeframe for 90-minute session/quarter focus. High probability confluenced with 5M TPD (works without TPD as well).",
+    "Universal Rule: SSMT is high probability when confluenced with TPD, but SMT setups execute and work without TPD across all cycles and timeframes."
   ],
   "customAlerts": [],
   "activeTasks": {

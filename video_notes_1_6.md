@@ -114,12 +114,12 @@ The strategy revolves around 4 primary market cycles, each associated with a spe
 
 1. **Monthly Cycle (4H Timeframe)**:
    * **Focus**: Used to evaluate the week.
-   * **High Probability Setup**: Sequential SMT (SSMT) with the previous week, confluenced with a **4-Hour (4H) TPD**.
+   * **High Probability Setup**: Sequential SMT (SSMT) with the previous week. High probability when confluenced with a **4-Hour (4H) TPD** (but works without it as well).
 2. **Weekly Cycle (1H Timeframe)**:
    * **Focus**: Used to evaluate daily behavior.
-   * **High Probability Setup**: SSMT between two days (e.g., Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, or Fri/Mon), confluenced with a **1-Hour (1H) TPD** (but also works without it).
+   * **High Probability Setup**: SSMT between two days (e.g., Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, or Fri/Mon). High probability when confluenced with a **1-Hour (1H) TPD** (but works without it as well).
 3. **Daily Cycle (15M Timeframe)**:
    * **Focus**: Used for session-level setups (London, NY AM, NY PM, Asia).
-   * **High Probability Setup**: SSMT confluenced with a **15-Minute (15M) TPD** (but also works without it).
+   * **High Probability Setup**: SSMT between sessions/quarters. High probability when confluenced with a **15-Minute (15M) TPD** (but works without it as well).
 4. **90-Minute Cycle (5M Timeframe)**:
-   * **Focus**: Used exclusively for the 90-minute session/quarter focus.
+   * **Focus**: Used exclusively for the 90-minute session/quarter focus. High probability when confluenced with a **5-Minute (5M) TPD** (but works without it as well).
