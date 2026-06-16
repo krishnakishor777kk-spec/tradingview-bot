@@ -41,11 +41,12 @@ Every quarter cycle has a specific institutional role:
 ### A. The Structural Time Trigger
 High-probability entries do not happen at random times. Price must align with **Time**.
 *   **The Equities Open Window**: The most critical time alignment window is **9:30 AM – 10:00 AM EST**.
-*   **Time Alignment Gaps**: The entry triggers are strictly checked at key time intervals:
-    *   **8:45 AM EST**: Look for a **15-Minute FVG/Gap**.
-    *   **9:15 AM EST**: Look for a **5-Minute FVG/Gap**.
-    *   **9:30 AM EST**: Look for a **1-Minute FVG/Gap** as equities open.
-*   **The Execution Rule**: If a setup forms outside of these algorithmic quarters or time alignment windows, it is a low-probability trade and must be ignored.
+*   **The 4-Cycle Alignment Rule**: We strictly use the 4 cycle-to-timeframe mappings:
+    1.  **Monthly Cycle**: Look for weekly SMTs on the **4H chart** (high probability with 4H TPD, but works without).
+    2.  **Weekly Cycle**: Look for daily SMTs (between consecutive days, e.g., Mon-Tue, Tue-Wed, etc.) on the **1H chart** (high probability with 1H TPD, but works without).
+    3.  **Daily Cycle**: Look for session-level SMTs on the **15M chart** (high probability with TPD, but works without).
+    4.  **90-Minute Cycle**: Look for session setups on the **5M chart** during the 90-minute session.
+*   **The Execution Rule**: SMT/SSMT sweeps are confluenced with TPD for high probability but work/execute *without* TPD across all cycles and timeframes.
 
 ---
 

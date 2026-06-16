@@ -34,17 +34,19 @@ TPDs are categorized based on their timeframe and narrative focus:
 | **Primary Timeframe** | Higher Timeframes (HTF): **H4, H6, Daily, Weekly** | Intraday Timeframes: **H1 or lower** |
 | **Purpose** | Used to trade the **Higher Timeframe Narrative** | Used intraday to **predict potential future SMTs** before they occur |
 | **How to Identify** | Observed via **market sentiment** (e.g., studying the daily closes and how they align) | Part of the intraday checklist (e.g., checking specific scheduled candles) |
-| **Entry Application** | Establishes the macro directional bias | Reversion Level acts as a key level; entry is framed via **Time Alignment Gaps** |
+| **Entry Application** | Establishes the macro directional bias | Reversion Level acts as a key level; entry is framed via **4-Cycle Alignment Rules** |
 
 #### Intraday Execution with Working TPDs:
 1. Identify a scheduled TPD candle (e.g., the **2:00 AM H4 TPD** during London session).
 2. If no TPD is present on the H4, drop down to the H1 timeframe and monitor the **7:00 AM, 8:00 AM, or 9:00 AM** candles.
 3. Look for a sequential SMT to form (e.g., between London and New York sessions).
 4. Identify the strongest asset in your anticipated direction. When it hits the reversion level and respects it during the morning session, prepare for entry.
-5. Use **Time Alignment Gaps** as execution triggers:
-   * **8:45 AM**: Check for a **15-minute gap**.
-   * **9:15 AM**: Check for a **5-minute gap**.
-   * **9:30 AM to 10:00 AM**: Check for a **1-minute gap** during the equities open.
+5. Use **4-Cycle Alignment** as execution triggers:
+   * **Monthly Cycle**: Look for weekly SMTs on the **4H chart** (high probability with 4H TPD, but works without).
+   * **Weekly Cycle**: Look for daily SMTs (between consecutive days, e.g., Mon-Tue, Tue-Wed, etc.) on the **1H chart** (high probability with 1H TPD, but works without).
+   * **Daily Cycle**: Look for session-level SMTs on the **15M chart** (high probability with TPD, but works without).
+   * **90-Minute Cycle**: Look for session setups on the **5M chart** during the 90-minute session.
+* Note: SMT/SSMT sweeps are confluenced with TPD for high probability but work/execute *without* TPD across all cycles and timeframes.
 
 ### 3. Market Maker TPD (MMXM Integration)
 High-probability **Reversal TPDs** will always exhibit a clean **Market Maker Model (MMXM)** on a lower timeframe alongside the CSD in Candle 2, providing a powerful confirmation of a "Smart Money Reversal."

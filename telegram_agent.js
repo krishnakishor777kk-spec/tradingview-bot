@@ -549,55 +549,7 @@ function parseQuotes(quotes) {
     })).filter(q => q.open && q.high && q.low && q.close);
 }
 
-// Find unmitigated FVGs (Gaps) on H1 chart
-function findActiveFVGs(bars, symbol) {
-    const fvgs = [];
-    for (let i = 2; i < bars.length; i++) {
-        const c1 = bars[i-2];
-        const c3 = bars[i];
-        
-        // Bullish FVG
-        if (c3.low > c1.high) {
-            let mitigated = false;
-            for (let j = i + 1; j < bars.length; j++) {
-                if (bars[j].low <= c1.high) {
-                    mitigated = true;
-                    break;
-                }
-            }
-            if (!mitigated) {
-                fvgs.push({
-                    symbol,
-                    type: 'BULLISH',
-                    top: c3.low,
-                    bottom: c1.high,
-                    formedTime: moment(c3.timestamp).tz("America/New_York").format("MM-DD HH:mm")
-                });
-            }
-        }
-        
-        // Bearish FVG
-        if (c3.high < c1.low) {
-            let mitigated = false;
-            for (let j = i + 1; j < bars.length; j++) {
-                if (bars[j].high >= c1.low) {
-                    mitigated = true;
-                    break;
-                }
-            }
-            if (!mitigated) {
-                fvgs.push({
-                    symbol,
-                    type: 'BEARISH',
-                    top: c1.low,
-                    bottom: c3.high,
-                    formedTime: moment(c3.timestamp).tz("America/New_York").format("MM-DD HH:mm")
-                });
-            }
-        }
-    }
-    return fvgs;
-}
+
 
 // Check custom watchlists set from phone
 async function checkCustomAlerts() {
@@ -791,7 +743,7 @@ async function runAlertsCheck() {
     // 1. Run user-defined custom price level alerts
     await checkCustomAlerts();
     
-    // 2. Run automated FVG tap & SMT sweep scanner
+    // 2. Run automated SMT sweep scanner
     await checkAutomatedScans();
 }
 
