@@ -564,15 +564,46 @@ if (require.main === module) {
         process.exit(1);
     }
 
-    // Simple dummy server to pass Render health checks
+    // HTTP Server to pass Render health checks & receive TradingView Webhooks
     const http = require('http');
     const PORT = process.env.PORT || 3000;
     const server = http.createServer((req, res) => {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('Trading Assistant is Active and Scanning!');
+        if (req.method === 'POST' && req.url === '/webhook') {
+            let body = '';
+            req.on('data', chunk => {
+                body += chunk.toString();
+            });
+            req.on('end', async () => {
+                console.log(`[WEBHOOK] Received alert: "${body}"`);
+                try {
+                    let alertText = body;
+                    // Attempt to parse JSON
+                    try {
+                        const json = JSON.parse(body);
+                        alertText = json.message || json.text || JSON.stringify(json, null, 2);
+                    } catch (e) {
+                        // Not JSON, fallback to raw text
+                    }
+                    
+                    // Push alert to Telegram
+                    await sendTelegram(`🚨 *TRADINGVIEW ALERT* 🚨\n\n${alertText}`);
+                    
+                    res.writeHead(200, { 'Content-Type': 'text/plain' });
+                    res.end('Webhook received & forwarded to Telegram');
+                } catch (err) {
+                    console.error("[WEBHOOK] Error processing alert:", err.message);
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Error processing webhook');
+                }
+            });
+        } else {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('Trading Assistant is Active and Scanning!');
+        }
     });
+    
     server.listen(PORT, () => {
-        console.log(`[AGENT] Dummy HTTP server listening on port ${PORT}`);
+        console.log(`[AGENT] HTTP Webhook server listening on port ${PORT}`);
     });
 
     startPolling();
