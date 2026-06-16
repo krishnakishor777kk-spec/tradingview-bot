@@ -106,3 +106,20 @@ To frame each trading day, you must run through this strict pre-market checklist
 2.  **Locate Key Levels**: Mark the previous day's high/low, session highs/lows, and active HTF FVGs.
 3.  **Identify Quarters & News**: Check the economic calendar for today's high-impact news times (to align volatility) and note the Quarter transitions.
 4.  **Confirm the Execution Plan**: Wait for price to enter a premium/discount level, look for a crack in correlation (SMT) during the 9:30 AM open window, and execute at the reversion level using a limit order.
+
+---
+
+## 7. The 4 Core Cycles & Timeframe Hierarchy
+The strategy revolves around 4 primary market cycles, each associated with a specific timeframe and setup criteria:
+
+1. **Monthly Cycle (4H Timeframe)**:
+   * **Focus**: Used to evaluate the week.
+   * **High Probability Setup**: Sequential SMT (SSMT) with the previous week, confluenced with a **4-Hour (4H) TPD**.
+2. **Weekly Cycle (1H Timeframe)**:
+   * **Focus**: Used to evaluate daily behavior.
+   * **High Probability Setup**: SSMT between two days (e.g., Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, or Fri/Mon), confluenced with a **1-Hour (1H) TPD** (but also works without it).
+3. **Daily Cycle (15M Timeframe)**:
+   * **Focus**: Used for session-level setups (London, NY AM, NY PM, Asia).
+   * **High Probability Setup**: SSMT confluenced with a **15-Minute (15M) TPD** (but also works without it).
+4. **90-Minute Cycle (5M Timeframe)**:
+   * **Focus**: Used exclusively for the 90-minute session/quarter focus.

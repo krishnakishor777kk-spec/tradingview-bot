@@ -1,5 +1,10 @@
 {
-  "lessons": [],
+  "lessons": [
+    "Monthly Cycle: 4H timeframe to evaluate the week. High probability is SSMT with previous week confluenced with 4H TPD.",
+    "Weekly Cycle: 1H timeframe to evaluate daily behavior. Look for SSMT between two days (Mon/Tue, Tue/Wed, Wed/Thu, Thu/Fri, Fri/Mon) confluenced with 1H TPD (works without too).",
+    "Daily Cycle: 15M timeframe for session-level setups (London, NY AM, NY PM, Asia). High probability is SSMT confluenced with 15M TPD (works without too).",
+    "90-Minute Cycle: 5M timeframe used exclusively for the 90-minute session/quarter focus."
+  ],
   "customAlerts": [],
   "activeTasks": {
     "scan15mSSMT": false,
