@@ -594,7 +594,6 @@ async function checkCustomAlerts() {
 // Scan and alert for automated SMT sweeps during session opens
 async function checkAutomatedScans() {
     const mem = getMemory();
-    if (!mem.activeTasks || !mem.activeTasks.scan15mSSMT) return;
     
     try {
         console.log("[SCANNER] Running automated SMT scans...");
@@ -685,7 +684,9 @@ async function checkAutomatedScans() {
                         `⚡ *Divergence*: ${sweeperAsset} swept previous low (${prevQ[sweeperAsset.toLowerCase()].low.toFixed(2)}), but ${failureAsset} respected low.\n\n` +
                         `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **15M Reversion Level** of Candle 2!`;
                     
-                    await sendTelegram(alertMsg);
+                    if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
+                        await sendTelegram(alertMsg);
+                    }
                 }
             }
             
@@ -713,7 +714,9 @@ async function checkAutomatedScans() {
                         `⚡ *Divergence*: ${sweeperAsset} swept previous high (${prevQ[sweeperAsset.toLowerCase()].high.toFixed(2)}), but ${failureAsset} respected high.\n\n` +
                         `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **15M Reversion Level** of Candle 2!`;
                     
-                    await sendTelegram(alertMsg);
+                    if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
+                        await sendTelegram(alertMsg);
+                    }
                 }
             }
         }
