@@ -72,6 +72,9 @@ function compileKnowledgeBase() {
     kb += "=== STUDY NOTES: VIDEOS 7-11 (TIME ALIGNMENT, STOP LOSS, VALIDATION) ===\n";
     kb += readNotesFile('video_notes_7_11.md') + "\n\n";
     
+    kb += "=== STUDY NOTES: VIDEOS 1-6 (QUARTERLY THEORY, TIME/PRICE ALIGNMENT, NARRATIVE, SMT BASICS) ===\n";
+    kb += readNotesFile('video_notes_1_6.md') + "\n\n";
+    
     return kb;
 }
 
@@ -132,6 +135,90 @@ async function sendTelegram(text) {
     }
 }
 
+// Regex XML Parser Helper
+function parseXmlValue(tag, block) {
+    const regex = new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</${tag}>`);
+    const match = block.match(regex);
+    return match ? match[1].trim() : "";
+}
+
+let newsCache = null;
+let lastNewsFetchTime = 0;
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in ms
+
+// Fetch economic calendar from faireconomy.media (Forex Factory feed)
+async function fetchEconomicCalendar() {
+    const now = Date.now();
+    if (newsCache && (now - lastNewsFetchTime < CACHE_DURATION)) {
+        console.log("[AGENT] Using cached economic calendar.");
+        return newsCache;
+    }
+    
+    try {
+        console.log("[AGENT] Fetching economic calendar...");
+        const res = await makeRequest("https://nfs.faireconomy.media/ff_calendar_thisweek.xml", { method: 'GET' });
+        if (res.statusCode !== 200) {
+            console.error("[AGENT] Economic calendar fetch failed:", res.statusCode);
+            return newsCache || [];
+        }
+        
+        const eventBlocks = res.body.split("<event>").slice(1);
+        const parsedEvents = [];
+        for (const block of eventBlocks) {
+            const title = parseXmlValue("title", block);
+            const country = parseXmlValue("country", block);
+            const date = parseXmlValue("date", block);
+            const time = parseXmlValue("time", block);
+            const impact = parseXmlValue("impact", block);
+            
+            if (country === "USD" && (impact === "High" || impact === "Medium")) {
+                parsedEvents.push({ title, country, date, time, impact });
+            }
+        }
+        
+        newsCache = parsedEvents;
+        lastNewsFetchTime = now;
+        return parsedEvents;
+    } catch (err) {
+        console.error("[AGENT] Economic calendar error:", err.message);
+        return newsCache || [];
+    }
+}
+
+// Format News Calendar Report
+function formatNewsForTelegram(events, targetDate = null) {
+    const todayStr = targetDate || moment().tz("America/New_York").format("MM-DD-YYYY");
+    const todayEvents = events.filter(e => e.date === todayStr);
+    
+    let report = `📅 *USD Economic Calendar (Today: ${todayStr} EST)*:\n`;
+    if (todayEvents.length === 0) {
+        report += "_No high or medium impact USD news scheduled for today._\n\n";
+    } else {
+        todayEvents.forEach(e => {
+            const flag = e.impact === 'High' ? '🔴 HIGH' : '🟠 MED';
+            report += `- *${e.time}* | [${flag}] ${e.title}\n`;
+        });
+        report += "\n";
+    }
+    
+    const upcomingEvents = events.filter(e => {
+        const eDate = moment(e.date, "MM-DD-YYYY");
+        const tDate = moment(todayStr, "MM-DD-YYYY");
+        return eDate.isAfter(tDate);
+    });
+    
+    if (upcomingEvents.length > 0) {
+        report += `📅 *Upcoming USD News (This Week)*:\n`;
+        upcomingEvents.slice(0, 5).forEach(e => {
+            const dayOfWeek = moment(e.date, "MM-DD-YYYY").format("ddd");
+            const flag = e.impact === 'High' ? '🔴 HIGH' : '🟠 MED';
+            report += `- ${dayOfWeek} ${e.time} | [${flag}] ${e.title} (${e.date.slice(0, 5)})\n`;
+        });
+    }
+    
+    return report;
+}
+
 // Call Gemini API with Core Knowledge + Memory Context
 async function askGemini(userMessage) {
     if (!GEMINI_API_KEY) {
@@ -142,6 +229,23 @@ async function askGemini(userMessage) {
     const mem = getMemory();
     
     const lessonsStr = mem.lessons.map((l, i) => `${i+1}. ${l}`).join('\n');
+    
+    // Fetch today's news for injection
+    let newsStatusStr = "TODAY'S USD ECONOMIC NEWS SCHEDULE (EST):\n";
+    try {
+        const calendarEvents = await fetchEconomicCalendar();
+        const todayStr = moment().tz("America/New_York").format("MM-DD-YYYY");
+        const todayEvents = calendarEvents.filter(e => e.date === todayStr);
+        if (todayEvents.length === 0) {
+            newsStatusStr += "No high/medium impact USD news scheduled for today.\n";
+        } else {
+            todayEvents.forEach(e => {
+                newsStatusStr += `- ${e.time}: [${e.impact} Impact] ${e.title}\n`;
+            });
+        }
+    } catch (e) {
+        newsStatusStr += "Economic calendar data unavailable.\n";
+    }
     
     const systemPrompt = `You are the personal Trading Assistant co-pilot for the user. You have been loaded with their private trading notes, blueprints, and rules. 
 Your brain contains the complete core content of Jacob Speculates mentorship (Videos 1-22).
@@ -154,6 +258,12 @@ CORE RULES TO REMEMBER:
 4. SMT local validation: Bullish failure swing asset must pullback to at least 50% discount of its local swing range, bearish to 50% premium.
 5. News volatility dictates the 3/2 or 2/3 distribution of the week.
 6. Decoupled markets (e.g. ES in Premium, NQ in Discount) are low probability and should be avoided.
+
+=== PRIVATE KNOWLEDGE BASE (VIDEOS 1-22) ===
+${kb}
+
+CURRENT MACRO RISK ENVIRONMENT:
+${newsStatusStr}
 
 LESSONS TAUGHT BY USER (PRIORITIZE THESE CORRECTIONS):
 ${lessonsStr || "No custom lessons taught yet. Listen to the user's feedback to learn."}
@@ -252,6 +362,25 @@ async function parseAndSetTask(text) {
 async function generateScannerStatus() {
     let report = "📊 *LIVE SCANNER STATUS* 📊\n\n";
     
+    // Add today's news schedule
+    try {
+        const events = await fetchEconomicCalendar();
+        const todayStr = moment().tz("America/New_York").format("MM-DD-YYYY");
+        const todayEvents = events.filter(e => e.date === todayStr);
+        report += `📅 *Economic News Today*:\n`;
+        if (todayEvents.length === 0) {
+            report += `- No high/medium impact USD news scheduled.\n\n`;
+        } else {
+            todayEvents.forEach(e => {
+                const flag = e.impact === 'High' ? '🔴 HIGH' : '🟠 MED';
+                report += `- ${e.time} | [${flag}] ${e.title}\n`;
+            });
+            report += "\n";
+        }
+    } catch (e) {
+        report += `📅 *Economic News*: Failed to fetch\n\n`;
+    }
+    
     try {
         const yf = new yahooFinance();
         const period1 = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4 hours
@@ -326,6 +455,14 @@ async function pollTelegramUpdates() {
                     if (text === '/bias' || text.toLowerCase() === 'bias') {
                         const biasMsg = await askGemini("What is the current Daily Bias trend structure based on the Monday close and expansion profiles? Tell me standard rules and what you see.");
                         await sendTelegram(biasMsg);
+                        continue;
+                    }
+                    
+                    if (text === '/news' || text.toLowerCase() === 'news') {
+                        await sendTelegram("🔍 Fetching today's economic calendar...");
+                        const events = await fetchEconomicCalendar();
+                        const newsMsg = formatNewsForTelegram(events);
+                        await sendTelegram(newsMsg);
                         continue;
                     }
                     
@@ -404,7 +541,9 @@ function startPolling() {
 module.exports = {
     startPolling,
     sendTelegram,
-    askGemini
+    askGemini,
+    fetchEconomicCalendar,
+    compileKnowledgeBase
 };
 
 // If run directly, start polling and bind to port for Render health checks
