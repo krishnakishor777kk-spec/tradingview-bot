@@ -97,7 +97,8 @@ function makeRequest(urlStr, options, payload = null) {
             port: u.port || 443,
             path: u.pathname + (u.search || ''),
             method: options.method || 'GET',
-            headers: options.headers || {}
+            headers: options.headers || {},
+            timeout: 15000 // 15 seconds timeout
         };
         
         if (payload) {
@@ -108,6 +109,11 @@ function makeRequest(urlStr, options, payload = null) {
             let body = '';
             res.on('data', chunk => body += chunk);
             res.on('end', () => resolve({ statusCode: res.statusCode, body }));
+        });
+        
+        req.on('timeout', () => {
+            req.destroy();
+            reject(new Error("Request timed out after 15 seconds"));
         });
         
         req.on('error', reject);
@@ -475,8 +481,13 @@ async function pollTelegramUpdates() {
                     
                     // 3. Fallback: Normal AI Assistant Chat
                     await sendTelegram("🤖 Thinking...");
-                    const aiReply = await askGemini(text);
-                    await sendTelegram(aiReply);
+                    try {
+                        const aiReply = await askGemini(text);
+                        await sendTelegram(aiReply);
+                    } catch (err) {
+                        console.error("[TELEGRAM] Gemini error:", err.message);
+                        await sendTelegram(`⚠️ Failed to generate AI response: ${err.message}`);
+                    }
                 }
             }
         }
