@@ -496,8 +496,97 @@ async function pollTelegramUpdates() {
     }
 }
 
-// Live price monitor to fire alerts set by the user from phone
-async function runAlertsCheck() {
+// Helper: Parse institutional quarters
+function getInstitutionalQuarter(timestamp) {
+    const m = moment(timestamp).tz("America/New_York");
+    const hour = m.hour();
+    const minute = m.minute();
+    const day = m.day();
+
+    if (day === 0 || day === 6) return null; // Skip weekends
+
+    const minutesSinceMidnight = hour * 60 + minute;
+    const dateStr = m.format("YYYY-MM-DD");
+
+    if (minutesSinceMidnight >= 0 && minutesSinceMidnight < 360) {
+        const q = Math.floor(minutesSinceMidnight / 90) + 1;
+        return { session: 'LONDON', quarter: q, key: `${dateStr}-LONDON-Q${q}` };
+    } else if (minutesSinceMidnight >= 360 && minutesSinceMidnight < 720) {
+        const q = Math.floor((minutesSinceMidnight - 360) / 90) + 1;
+        return { session: 'NY_AM', quarter: q, key: `${dateStr}-NY_AM-Q${q}` };
+    } else if (minutesSinceMidnight >= 720 && minutesSinceMidnight < 1080) {
+        const q = Math.floor((minutesSinceMidnight - 720) / 90) + 1;
+        return { session: 'NY_PM', quarter: q, key: `${dateStr}-NY_PM-Q${q}` };
+    } else if (minutesSinceMidnight >= 1080 && minutesSinceMidnight < 1440) {
+        const q = Math.floor((minutesSinceMidnight - 1080) / 90) + 1;
+        return { session: 'ASIA', quarter: q, key: `${dateStr}-ASIA-Q${q}` };
+    }
+    return null;
+}
+
+// Helper: Parse chart quotes
+function parseQuotes(quotes) {
+    return quotes.map(q => ({
+        timestamp: q.date.getTime(),
+        open: q.open,
+        high: q.high,
+        low: q.low,
+        close: q.close
+    })).filter(q => q.open && q.high && q.low && q.close);
+}
+
+// Find unmitigated FVGs (Gaps) on H1 chart
+function findActiveFVGs(bars, symbol) {
+    const fvgs = [];
+    for (let i = 2; i < bars.length; i++) {
+        const c1 = bars[i-2];
+        const c3 = bars[i];
+        
+        // Bullish FVG
+        if (c3.low > c1.high) {
+            let mitigated = false;
+            for (let j = i + 1; j < bars.length; j++) {
+                if (bars[j].low <= c1.high) {
+                    mitigated = true;
+                    break;
+                }
+            }
+            if (!mitigated) {
+                fvgs.push({
+                    symbol,
+                    type: 'BULLISH',
+                    top: c3.low,
+                    bottom: c1.high,
+                    formedTime: moment(c3.timestamp).tz("America/New_York").format("MM-DD HH:mm")
+                });
+            }
+        }
+        
+        // Bearish FVG
+        if (c3.high < c1.low) {
+            let mitigated = false;
+            for (let j = i + 1; j < bars.length; j++) {
+                if (bars[j].high >= c1.low) {
+                    mitigated = true;
+                    break;
+                }
+            }
+            if (!mitigated) {
+                fvgs.push({
+                    symbol,
+                    type: 'BEARISH',
+                    top: c1.low,
+                    bottom: c3.high,
+                    formedTime: moment(c3.timestamp).tz("America/New_York").format("MM-DD HH:mm")
+                });
+            }
+        }
+    }
+    return fvgs;
+}
+
+// Check custom watchlists set from phone
+async function checkCustomAlerts() {
     const mem = getMemory();
     if (mem.customAlerts.length === 0) return;
     
@@ -512,33 +601,182 @@ async function runAlertsCheck() {
             const lastNQ = nqRes.quotes[nqRes.quotes.length - 1];
             
             let listChanged = false;
-            
             for (let alert of mem.customAlerts) {
                 if (alert.status === 'PENDING') {
                     const price = alert.ticker === 'ES' ? lastES.close : lastNQ.close;
                     const high = alert.ticker === 'ES' ? lastES.high : lastNQ.high;
                     const low = alert.ticker === 'ES' ? lastES.low : lastNQ.low;
                     
-                    // Simple check if price tapped the level
                     const tapped = (low <= alert.level && high >= alert.level);
                     if (tapped) {
                         alert.status = 'TRIGGERED';
                         listChanged = true;
-                        
                         await sendTelegram(`🔔 *TARGET LEVEL TAP NOTIFICATION!* 🔔\n\n📈 *Asset*: ${alert.ticker}=F\n⚡ *Event*: Target level ${alert.level.toFixed(2)} was tapped!\n💵 *Current Close*: ${price.toFixed(2)}\n\n📱 Ready for next instructions!`);
                     }
                 }
             }
-            
             if (listChanged) {
-                // Filter out triggered alerts to keep memory clean
                 mem.customAlerts = mem.customAlerts.filter(a => a.status === 'PENDING');
                 saveMemory(mem);
             }
         }
     } catch (e) {
-        console.error("[ALERTS SCAN] Price scan failed:", e.message);
+        console.error("[ALERTS SCAN] Custom check failed:", e.message);
     }
+}
+
+// Scan and alert for automated set-ups (FVG taps + SMT sweeps during session opens)
+async function checkAutomatedScans() {
+    const mem = getMemory();
+    if (!mem.activeTasks || !mem.activeTasks.scan15mSSMT) return;
+    
+    try {
+        console.log("[SCANNER] Running automated FVG + SMT scans...");
+        const yf = new yahooFinance();
+        const period1 = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000); // 3 days
+        const period2 = new Date();
+        
+        // 1. Fetch 1H data to locate active unmitigated FVGs
+        const esH1Res = await yf.chart('ES=F', { period1, period2, interval: '1h' });
+        const nqH1Res = await yf.chart('NQ=F', { period1, period2, interval: '1h' });
+        
+        if (!esH1Res.quotes || !nqH1Res.quotes) return;
+        
+        const esH1 = parseQuotes(esH1Res.quotes);
+        const nqH1 = parseQuotes(nqH1Res.quotes);
+        
+        const esFVGs = findActiveFVGs(esH1, "ES");
+        const nqFVGs = findActiveFVGs(nqH1, "NQ");
+        
+        // 2. Fetch 15M charts for today's SMT scan
+        const startToday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const es15mRes = await yf.chart('ES=F', { period1: startToday, period2, interval: '15m' });
+        const nq15mRes = await yf.chart('NQ=F', { period1: startToday, period2, interval: '15m' });
+        
+        if (!es15mRes.quotes || !nq15mRes.quotes) return;
+        
+        const es15m = parseQuotes(es15mRes.quotes);
+        const nq15m = parseQuotes(nq15mRes.quotes);
+        
+        const nqMap = new Map();
+        nq15m.forEach(q => nqMap.set(moment(q.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm"), q));
+        
+        const aligned = [];
+        for (const es of es15m) {
+            const dateStr = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm");
+            const nq = nqMap.get(dateStr);
+            if (nq) aligned.push({ date: dateStr, timestamp: es.timestamp, es, nq });
+        }
+        aligned.sort((a, b) => a.timestamp - b.timestamp);
+        
+        const quartersMap = new Map();
+        for (const bar of aligned) {
+            const qr = getInstitutionalQuarter(bar.timestamp);
+            if (qr) {
+                if (!quartersMap.has(qr.key)) {
+                    quartersMap.set(qr.key, {
+                        key: qr.key,
+                        timestamp: bar.timestamp,
+                        es: { high: 0, low: 999999 },
+                        nq: { high: 0, low: 999999 },
+                        candles: []
+                    });
+                }
+                const qObj = quartersMap.get(qr.key);
+                qObj.candles.push(bar);
+                qObj.es.high = Math.max(qObj.es.high, bar.es.high);
+                qObj.es.low = Math.min(qObj.es.low, bar.es.low);
+                qObj.nq.high = Math.max(qObj.nq.high, bar.nq.high);
+                qObj.nq.low = Math.min(qObj.nq.low, bar.nq.low);
+            }
+        }
+        
+        const sortedQ = Array.from(quartersMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+        if (sortedQ.length < 2) return;
+        
+        const prevQ = sortedQ[sortedQ.length - 2];
+        const latestQ = sortedQ[sortedQ.length - 1];
+        
+        if (!mem.alertedSetupKeys) {
+            mem.alertedSetupKeys = [];
+        }
+        
+        let memoryUpdated = false;
+        
+        for (const bar of latestQ.candles) {
+            const esSweptL = bar.es.low < prevQ.es.low;
+            const nqSweptL = bar.nq.low < prevQ.nq.low;
+            const bullishSMT = (esSweptL && !nqSweptL) || (nqSweptL && !esSweptL);
+            
+            if (bullishSMT) {
+                const failureAsset = nqSweptL ? "ES" : "NQ";
+                const sweeperAsset = nqSweptL ? "NQ" : "ES";
+                const setupKey = `BULLISH-SMT-${latestQ.key}-${failureAsset}`;
+                
+                if (!mem.alertedSetupKeys.includes(setupKey)) {
+                    const targetFVGs = failureAsset === 'NQ' ? nqFVGs : esFVGs;
+                    const activeFVG = targetFVGs.find(f => f.type === 'BULLISH' && bar[failureAsset.toLowerCase()].close <= f.top && bar[failureAsset.toLowerCase()].close >= f.bottom);
+                    
+                    if (activeFVG) {
+                        mem.alertedSetupKeys.push(setupKey);
+                        memoryUpdated = true;
+                        
+                        const alertMsg = `🚨 *HIGH-PROBABILITY ALIGNMENT ALERT!* 🚨\n\n` +
+                            `📈 *Setup*: Bullish 15M SMT + 1H FVG Tap\n` +
+                            `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
+                            `⚡ *Divergence*: ${sweeperAsset} swept previous low (${prevQ[sweeperAsset.toLowerCase()].low.toFixed(2)}), but ${failureAsset} respected low.\n` +
+                            `📦 *FVG Tap*: ${failureAsset} tapped active 1H FVG (Range: ${activeFVG.bottom.toFixed(2)} - ${activeFVG.top.toFixed(2)}, formed at ${activeFVG.formedTime}).\n\n` +
+                            `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Place a limit buy order at the **15M Reversion Level** of Candle 2!`;
+                        
+                        await sendTelegram(alertMsg);
+                    }
+                }
+            }
+            
+            const esSweptH = bar.es.high > prevQ.es.high;
+            const nqSweptH = bar.nq.high > prevQ.nq.high;
+            const bearishSMT = (esSweptH && !nqSweptH) || (nqSweptH && !esSweptH);
+            
+            if (bearishSMT) {
+                const failureAsset = nqSweptH ? "ES" : "NQ";
+                const sweeperAsset = nqSweptH ? "NQ" : "ES";
+                const setupKey = `BEARISH-SMT-${latestQ.key}-${failureAsset}`;
+                
+                if (!mem.alertedSetupKeys.includes(setupKey)) {
+                    const targetFVGs = failureAsset === 'NQ' ? nqFVGs : esFVGs;
+                    const activeFVG = targetFVGs.find(f => f.type === 'BEARISH' && bar[failureAsset.toLowerCase()].close <= f.top && bar[failureAsset.toLowerCase()].close >= f.bottom);
+                    
+                    if (activeFVG) {
+                        mem.alertedSetupKeys.push(setupKey);
+                        memoryUpdated = true;
+                        
+                        const alertMsg = `🚨 *HIGH-PROBABILITY ALIGNMENT ALERT!* 🚨\n\n` +
+                            `📉 *Setup*: Bearish 15M SMT + 1H FVG Tap\n` +
+                            `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
+                            `⚡ *Divergence*: ${sweeperAsset} swept previous high (${prevQ[sweeperAsset.toLowerCase()].high.toFixed(2)}), but ${failureAsset} respected high.\n` +
+                            `📦 *FVG Tap*: ${failureAsset} tapped active 1H FVG (Range: ${activeFVG.bottom.toFixed(2)} - ${activeFVG.top.toFixed(2)}, formed at ${activeFVG.formedTime}).\n\n` +
+                            `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Place a limit sell order at the **15M Reversion Level** of Candle 2!`;
+                        
+                        await sendTelegram(alertMsg);
+                    }
+                }
+            }
+        }
+        if (memoryUpdated) {
+            saveMemory(mem);
+        }
+    } catch (err) {
+        console.error("[SCANNER] Automated check failed:", err.message);
+    }
+}
+
+// Main background scheduler
+async function runAlertsCheck() {
+    // 1. Run user-defined custom price level alerts
+    await checkCustomAlerts();
+    
+    // 2. Run automated FVG tap & SMT sweep scanner
+    await checkAutomatedScans();
 }
 
 // Background poll loops
