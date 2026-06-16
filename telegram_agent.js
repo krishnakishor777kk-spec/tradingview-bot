@@ -596,6 +596,35 @@ async function checkCustomAlerts() {
 }
 
 // Scan and alert for automated SMT sweeps during session opens
+// Helper: Get session name based on time
+function getSession(timestamp) {
+    const m = moment(timestamp).tz("America/New_York");
+    const hour = m.hour();
+    const minute = m.minute();
+    const minutesSinceMidnight = hour * 60 + minute;
+    
+    if (minutesSinceMidnight >= 0 && minutesSinceMidnight < 360) {
+        return 'LONDON';
+    } else if (minutesSinceMidnight >= 360 && minutesSinceMidnight < 720) {
+        return 'NY_AM';
+    } else if (minutesSinceMidnight >= 720 && minutesSinceMidnight < 1080) {
+        return 'NY_PM';
+    } else if (minutesSinceMidnight >= 1080 && minutesSinceMidnight < 1440) {
+        return 'ASIA';
+    }
+    return null;
+}
+
+// Helper: Get previous session name
+function getPreviousSession(session) {
+    if (session === 'LONDON') return 'ASIA';
+    if (session === 'NY_AM') return 'LONDON';
+    if (session === 'NY_PM') return 'NY_AM';
+    if (session === 'ASIA') return 'NY_PM';
+    return null;
+}
+
+// Scan and alert for automated SMT sweeps during session opens (comparing against previous session highs/lows)
 async function checkAutomatedScans() {
     const mem = getMemory();
     
@@ -617,44 +646,56 @@ async function checkAutomatedScans() {
         const lastES = es15m[es15m.length - 1];
         const lastNQ = nq15m[nq15m.length - 1];
         
+        if (!lastES || !lastNQ) return;
+        
+        const currentSessionType = getSession(lastES.timestamp);
+        if (!currentSessionType) return;
+        
+        const prevSessionType = getPreviousSession(currentSessionType);
+        
+        const todayStr = moment().tz("America/New_York").format("YYYY-MM-DD");
+        const yesterdayStr = moment().subtract(1, 'day').tz("America/New_York").format("YYYY-MM-DD");
+        
+        let prevSessionHighES = 0;
+        let prevSessionLowES = 999999;
+        let prevSessionHighNQ = 0;
+        let prevSessionLowNQ = 999999;
+        let prevSessionFound = false;
+        
+        const currentSessionBars = [];
+        
         const nqMap = new Map();
         nq15m.forEach(q => nqMap.set(moment(q.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm"), q));
         
-        const aligned = [];
         for (const es of es15m) {
             const dateStr = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm");
             const nq = nqMap.get(dateStr);
-            if (nq) aligned.push({ date: dateStr, timestamp: es.timestamp, es, nq });
-        }
-        aligned.sort((a, b) => a.timestamp - b.timestamp);
-        
-        const quartersMap = new Map();
-        for (const bar of aligned) {
-            const qr = getInstitutionalQuarter(bar.timestamp);
-            if (qr) {
-                if (!quartersMap.has(qr.key)) {
-                    quartersMap.set(qr.key, {
-                        key: qr.key,
-                        timestamp: bar.timestamp,
-                        es: { high: 0, low: 999999 },
-                        nq: { high: 0, low: 999999 },
-                        candles: []
-                    });
-                }
-                const qObj = quartersMap.get(qr.key);
-                qObj.candles.push(bar);
-                qObj.es.high = Math.max(qObj.es.high, bar.es.high);
-                qObj.es.low = Math.min(qObj.es.low, bar.es.low);
-                qObj.nq.high = Math.max(qObj.nq.high, bar.nq.high);
-                qObj.nq.low = Math.min(qObj.nq.low, bar.nq.low);
+            if (!nq) continue;
+            
+            const barSession = getSession(es.timestamp);
+            const barDate = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD");
+            
+            const isPrevSessionDate = (currentSessionType === 'LONDON' && prevSessionType === 'ASIA')
+                ? (barDate === yesterdayStr || barDate === todayStr)
+                : (barDate === todayStr || barDate === yesterdayStr);
+            
+            if (barSession === prevSessionType && isPrevSessionDate) {
+                prevSessionFound = true;
+                prevSessionHighES = Math.max(prevSessionHighES, es.high);
+                prevSessionLowES = Math.min(prevSessionLowES, es.low);
+                prevSessionHighNQ = Math.max(prevSessionHighNQ, nq.high);
+                prevSessionLowNQ = Math.min(prevSessionLowNQ, nq.low);
+            }
+            
+            if (barSession === currentSessionType && barDate === todayStr) {
+                currentSessionBars.push({ date: dateStr, timestamp: es.timestamp, es, nq });
             }
         }
         
-        const sortedQ = Array.from(quartersMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-        if (sortedQ.length < 2) return;
-        
-        const prevQ = sortedQ[sortedQ.length - 2];
-        const latestQ = sortedQ[sortedQ.length - 1];
+        if (!prevSessionFound || currentSessionBars.length === 0) {
+            console.log(`[SCANNER] Prev session [${prevSessionType}] not found or current session empty.`);
+            return;
+        }
         
         if (!mem.alertedSetupKeys) {
             mem.alertedSetupKeys = [];
@@ -662,27 +703,28 @@ async function checkAutomatedScans() {
         
         let memoryUpdated = false;
         const detectedSMTs = [];
+        const currentSessionKey = `${todayStr}-${currentSessionType}`;
         
-        for (const bar of latestQ.candles) {
-            const esSweptL = bar.es.low < prevQ.es.low;
-            const nqSweptL = bar.nq.low < prevQ.nq.low;
+        for (const bar of currentSessionBars) {
+            const esSweptL = bar.es.low < prevSessionLowES;
+            const nqSweptL = bar.nq.low < prevSessionLowNQ;
             const bullishSMT = (esSweptL && !nqSweptL) || (nqSweptL && !esSweptL);
             
             if (bullishSMT) {
                 const failureAsset = nqSweptL ? "ES" : "NQ";
                 const sweeperAsset = nqSweptL ? "NQ" : "ES";
-                const setupKey = `BULLISH-SMT-${latestQ.key}-${failureAsset}`;
+                const setupKey = `BULLISH-SMT-${currentSessionKey}-${failureAsset}`;
                 
-                const smtDesc = `Bullish SMT: ${sweeperAsset} swept low (${prevQ[sweeperAsset.toLowerCase()].low.toFixed(2)}), but ${failureAsset} failed.`;
+                const smtDesc = `Bullish SMT: ${sweeperAsset} swept low (${(sweeperAsset === 'NQ' ? prevSessionLowNQ : prevSessionLowES).toFixed(2)}), but ${failureAsset} failed.`;
                 if (!detectedSMTs.includes(smtDesc)) {
                     detectedSMTs.push(smtDesc);
                 }
                 
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
                     const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
-                        `📈 *Setup*: Bullish 15M SMT\n` +
-                        `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
-                        `⚡ *Divergence*: ${sweeperAsset} swept previous low (${prevQ[sweeperAsset.toLowerCase()].low.toFixed(2)}), but ${failureAsset} respected low.\n\n` +
+                        `📈 *Setup*: Bullish 15M Session SMT\n` +
+                        `📅 *Session*: \`${currentSessionKey}\`\n` +
+                        `⚡ *Divergence*: ${sweeperAsset} swept previous session low (${(sweeperAsset === 'NQ' ? prevSessionLowNQ : prevSessionLowES).toFixed(2)}), but ${failureAsset} respected low.\n\n` +
                         `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **15M Reversion Level** of Candle 2!`;
                     
                     if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
@@ -693,25 +735,25 @@ async function checkAutomatedScans() {
                 }
             }
             
-            const esSweptH = bar.es.high > prevQ.es.high;
-            const nqSweptH = bar.nq.high > prevQ.nq.high;
+            const esSweptH = bar.es.high > prevSessionHighES;
+            const nqSweptH = bar.nq.high > prevSessionHighNQ;
             const bearishSMT = (esSweptH && !nqSweptH) || (nqSweptH && !esSweptH);
             
             if (bearishSMT) {
-                const failureAsset = nqSweptH ? "ES" : "NQ";
-                const sweeperAsset = nqSweptH ? "NQ" : "ES";
-                const setupKey = `BEARISH-SMT-${latestQ.key}-${failureAsset}`;
+                const failureAsset = nqSweptH ? "NQ" : "ES";
+                const sweeperAsset = nqSweptH ? "ES" : "NQ";
+                const setupKey = `BEARISH-SMT-${currentSessionKey}-${failureAsset}`;
                 
-                const smtDesc = `Bearish SMT: ${sweeperAsset} swept high (${prevQ[sweeperAsset.toLowerCase()].high.toFixed(2)}), but ${failureAsset} failed.`;
+                const smtDesc = `Bearish SMT: ${sweeperAsset} swept high (${(sweeperAsset === 'ES' ? prevSessionHighES : prevSessionHighNQ).toFixed(2)}), but ${failureAsset} failed.`;
                 if (!detectedSMTs.includes(smtDesc)) {
                     detectedSMTs.push(smtDesc);
                 }
                 
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
                     const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
-                        `📉 *Setup*: Bearish 15M SMT\n` +
-                        `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
-                        `⚡ *Divergence*: ${sweeperAsset} swept previous high (${prevQ[sweeperAsset.toLowerCase()].high.toFixed(2)}), but ${failureAsset} respected high.\n\n` +
+                        `📉 *Setup*: Bearish 15M Session SMT\n` +
+                        `📅 *Session*: \`${currentSessionKey}\`\n` +
+                        `⚡ *Divergence*: ${sweeperAsset} swept previous session high (${(sweeperAsset === 'ES' ? prevSessionHighES : prevSessionHighNQ).toFixed(2)}), but ${failureAsset} respected high.\n\n` +
                         `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **15M Reversion Level** of Candle 2!`;
                     
                     if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
@@ -726,7 +768,7 @@ async function checkAutomatedScans() {
         // Save latest scan results in memory
         mem.latestScanResults = {
             lastScanTime: moment().tz("America/New_York").format("YYYY-MM-DD HH:mm:ss EST"),
-            latestQuarter: latestQ.key,
+            latestQuarter: currentSessionKey,
             currentPrices: {
                 ES: lastES ? lastES.close : null,
                 NQ: lastNQ ? lastNQ.close : null
