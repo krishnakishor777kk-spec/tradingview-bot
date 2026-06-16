@@ -331,11 +331,15 @@ async function parseAndSetTask(text) {
     const mem = getMemory();
     const lowercase = text.toLowerCase();
     
-    // Check if user is asking to scan for 15M SSMT
-    if (lowercase.includes("15m ssmt") && (lowercase.includes("scan") || lowercase.includes("monitor") || lowercase.includes("inform"))) {
+    // Check if user is asking to scan for 15M SMT / SSMT
+    const hasSmtKeyword = lowercase.includes("15m smt") || lowercase.includes("15m ssmt") || 
+                          lowercase.includes("15-minute smt") || lowercase.includes("15-minute ssmt") || 
+                          lowercase.includes("15 minute smt") || lowercase.includes("15 minute ssmt");
+    if (hasSmtKeyword && (lowercase.includes("scan") || lowercase.includes("monitor") || lowercase.includes("inform"))) {
         mem.activeTasks.scan15mSSMT = true;
+        mem.alertedSetupKeys = []; // Reset alerted keys so we alert on currently active sweeps immediately!
         saveMemory(mem);
-        return "✅ Scanning Task Activated: I will scan ES, NQ, and YM for 15-Minute SSMT setups and push alerts immediately to your phone.";
+        return "✅ Scanning Task Activated: I will scan ES, NQ, and YM for 15-Minute SMT setups and push alerts immediately to your phone.";
     }
     
     // Check if user is clearing scans
@@ -675,9 +679,6 @@ async function checkAutomatedScans() {
                 }
                 
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
-                    mem.alertedSetupKeys.push(setupKey);
-                    memoryUpdated = true;
-                    
                     const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
                         `📈 *Setup*: Bullish 15M SMT\n` +
                         `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
@@ -685,6 +686,8 @@ async function checkAutomatedScans() {
                         `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **15M Reversion Level** of Candle 2!`;
                     
                     if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
+                        mem.alertedSetupKeys.push(setupKey);
+                        memoryUpdated = true;
                         await sendTelegram(alertMsg);
                     }
                 }
@@ -705,9 +708,6 @@ async function checkAutomatedScans() {
                 }
                 
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
-                    mem.alertedSetupKeys.push(setupKey);
-                    memoryUpdated = true;
-                    
                     const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
                         `📉 *Setup*: Bearish 15M SMT\n` +
                         `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
@@ -715,6 +715,8 @@ async function checkAutomatedScans() {
                         `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **15M Reversion Level** of Candle 2!`;
                     
                     if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
+                        mem.alertedSetupKeys.push(setupKey);
+                        memoryUpdated = true;
                         await sendTelegram(alertMsg);
                     }
                 }
