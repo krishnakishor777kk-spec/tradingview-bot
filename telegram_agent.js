@@ -625,31 +625,18 @@ async function checkCustomAlerts() {
     }
 }
 
-// Scan and alert for automated set-ups (FVG taps + SMT sweeps during session opens)
+// Scan and alert for automated SMT sweeps during session opens
 async function checkAutomatedScans() {
     const mem = getMemory();
     if (!mem.activeTasks || !mem.activeTasks.scan15mSSMT) return;
     
     try {
-        console.log("[SCANNER] Running automated FVG + SMT scans...");
+        console.log("[SCANNER] Running automated SMT scans...");
         const yf = new yahooFinance();
-        const period1 = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000); // 3 days
         const period2 = new Date();
+        const startToday = new Date(Date.now() - 24 * 60 * 60 * 1000); // last 24h
         
-        // 1. Fetch 1H data to locate active unmitigated FVGs
-        const esH1Res = await yf.chart('ES=F', { period1, period2, interval: '1h' });
-        const nqH1Res = await yf.chart('NQ=F', { period1, period2, interval: '1h' });
-        
-        if (!esH1Res.quotes || !nqH1Res.quotes) return;
-        
-        const esH1 = parseQuotes(esH1Res.quotes);
-        const nqH1 = parseQuotes(nqH1Res.quotes);
-        
-        const esFVGs = findActiveFVGs(esH1, "ES");
-        const nqFVGs = findActiveFVGs(nqH1, "NQ");
-        
-        // 2. Fetch 15M charts for today's SMT scan
-        const startToday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        // Fetch 15M charts for today's SMT scan
         const es15mRes = await yf.chart('ES=F', { period1: startToday, period2, interval: '15m' });
         const nq15mRes = await yf.chart('NQ=F', { period1: startToday, period2, interval: '15m' });
         
@@ -714,22 +701,16 @@ async function checkAutomatedScans() {
                 const setupKey = `BULLISH-SMT-${latestQ.key}-${failureAsset}`;
                 
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
-                    const targetFVGs = failureAsset === 'NQ' ? nqFVGs : esFVGs;
-                    const activeFVG = targetFVGs.find(f => f.type === 'BULLISH' && bar[failureAsset.toLowerCase()].close <= f.top && bar[failureAsset.toLowerCase()].close >= f.bottom);
+                    mem.alertedSetupKeys.push(setupKey);
+                    memoryUpdated = true;
                     
-                    if (activeFVG) {
-                        mem.alertedSetupKeys.push(setupKey);
-                        memoryUpdated = true;
-                        
-                        const alertMsg = `🚨 *HIGH-PROBABILITY ALIGNMENT ALERT!* 🚨\n\n` +
-                            `📈 *Setup*: Bullish 15M SMT + 1H FVG Tap\n` +
-                            `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
-                            `⚡ *Divergence*: ${sweeperAsset} swept previous low (${prevQ[sweeperAsset.toLowerCase()].low.toFixed(2)}), but ${failureAsset} respected low.\n` +
-                            `📦 *FVG Tap*: ${failureAsset} tapped active 1H FVG (Range: ${activeFVG.bottom.toFixed(2)} - ${activeFVG.top.toFixed(2)}, formed at ${activeFVG.formedTime}).\n\n` +
-                            `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Place a limit buy order at the **15M Reversion Level** of Candle 2!`;
-                        
-                        await sendTelegram(alertMsg);
-                    }
+                    const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
+                        `📈 *Setup*: Bullish 15M SMT\n` +
+                        `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
+                        `⚡ *Divergence*: ${sweeperAsset} swept previous low (${prevQ[sweeperAsset.toLowerCase()].low.toFixed(2)}), but ${failureAsset} respected low.\n\n` +
+                        `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **15M Reversion Level** of Candle 2!`;
+                    
+                    await sendTelegram(alertMsg);
                 }
             }
             
@@ -743,22 +724,16 @@ async function checkAutomatedScans() {
                 const setupKey = `BEARISH-SMT-${latestQ.key}-${failureAsset}`;
                 
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
-                    const targetFVGs = failureAsset === 'NQ' ? nqFVGs : esFVGs;
-                    const activeFVG = targetFVGs.find(f => f.type === 'BEARISH' && bar[failureAsset.toLowerCase()].close <= f.top && bar[failureAsset.toLowerCase()].close >= f.bottom);
+                    mem.alertedSetupKeys.push(setupKey);
+                    memoryUpdated = true;
                     
-                    if (activeFVG) {
-                        mem.alertedSetupKeys.push(setupKey);
-                        memoryUpdated = true;
-                        
-                        const alertMsg = `🚨 *HIGH-PROBABILITY ALIGNMENT ALERT!* 🚨\n\n` +
-                            `📉 *Setup*: Bearish 15M SMT + 1H FVG Tap\n` +
-                            `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
-                            `⚡ *Divergence*: ${sweeperAsset} swept previous high (${prevQ[sweeperAsset.toLowerCase()].high.toFixed(2)}), but ${failureAsset} respected high.\n` +
-                            `📦 *FVG Tap*: ${failureAsset} tapped active 1H FVG (Range: ${activeFVG.bottom.toFixed(2)} - ${activeFVG.top.toFixed(2)}, formed at ${activeFVG.formedTime}).\n\n` +
-                            `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Place a limit sell order at the **15M Reversion Level** of Candle 2!`;
-                        
-                        await sendTelegram(alertMsg);
-                    }
+                    const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
+                        `📉 *Setup*: Bearish 15M SMT\n` +
+                        `📅 *Session Quarter*: \`${latestQ.key}\`\n` +
+                        `⚡ *Divergence*: ${sweeperAsset} swept previous high (${prevQ[sweeperAsset.toLowerCase()].high.toFixed(2)}), but ${failureAsset} respected high.\n\n` +
+                        `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **15M Reversion Level** of Candle 2!`;
+                    
+                    await sendTelegram(alertMsg);
                 }
             }
         }
