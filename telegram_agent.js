@@ -253,6 +253,17 @@ async function askGemini(userMessage) {
         newsStatusStr += "Economic calendar data unavailable.\n";
     }
     
+    // Fetch latest scan findings from memory
+    const esPriceStr = (mem.latestScanResults && mem.latestScanResults.currentPrices && mem.latestScanResults.currentPrices.ES) ? mem.latestScanResults.currentPrices.ES.toFixed(2) : "Unknown";
+    const nqPriceStr = (mem.latestScanResults && mem.latestScanResults.currentPrices && mem.latestScanResults.currentPrices.NQ) ? mem.latestScanResults.currentPrices.NQ.toFixed(2) : "Unknown";
+    
+    const scanResultsStr = mem.latestScanResults ? `
+- Last Scan Time: ${mem.latestScanResults.lastScanTime}
+- Latest Session Quarter: ${mem.latestScanResults.latestQuarter}
+- Current Prices: ES: ${esPriceStr}, NQ: ${nqPriceStr}
+- Active Quarter SMT Sweeps: ${JSON.stringify(mem.latestScanResults.detectedSMTs)}
+` : "No SMT/FVG scan results available yet.";
+    
     const systemPrompt = `You are the personal Trading Assistant co-pilot for the user. You have been loaded with their private trading notes, blueprints, and rules. 
 Your brain contains the complete core content of Jacob Speculates mentorship (Videos 1-22).
 You must evaluate setups, answer questions, and respond ONLY using these core trading rules.
@@ -277,6 +288,9 @@ ${lessonsStr || "No custom lessons taught yet. Listen to the user's feedback to 
 CURRENT STATE:
 - Active scanning tasks: ${JSON.stringify(mem.activeTasks)}
 - Watchlist target levels: ${JSON.stringify(mem.customAlerts)}
+
+LATEST MARKET DATA & SCAN DETAILS:
+${scanResultsStr}
 
 Your tone should be professional, clear, and highly aligned with institutional trading concepts. Do not use standard retail trading slang.
 Keep responses concise since the user is reading this on a phone.`;
@@ -645,6 +659,9 @@ async function checkAutomatedScans() {
         const es15m = parseQuotes(es15mRes.quotes);
         const nq15m = parseQuotes(nq15mRes.quotes);
         
+        const lastES = es15m[es15m.length - 1];
+        const lastNQ = nq15m[nq15m.length - 1];
+        
         const nqMap = new Map();
         nq15m.forEach(q => nqMap.set(moment(q.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm"), q));
         
@@ -689,6 +706,7 @@ async function checkAutomatedScans() {
         }
         
         let memoryUpdated = false;
+        const detectedSMTs = [];
         
         for (const bar of latestQ.candles) {
             const esSweptL = bar.es.low < prevQ.es.low;
@@ -699,6 +717,11 @@ async function checkAutomatedScans() {
                 const failureAsset = nqSweptL ? "ES" : "NQ";
                 const sweeperAsset = nqSweptL ? "NQ" : "ES";
                 const setupKey = `BULLISH-SMT-${latestQ.key}-${failureAsset}`;
+                
+                const smtDesc = `Bullish SMT: ${sweeperAsset} swept low (${prevQ[sweeperAsset.toLowerCase()].low.toFixed(2)}), but ${failureAsset} failed.`;
+                if (!detectedSMTs.includes(smtDesc)) {
+                    detectedSMTs.push(smtDesc);
+                }
                 
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
                     mem.alertedSetupKeys.push(setupKey);
@@ -723,6 +746,11 @@ async function checkAutomatedScans() {
                 const sweeperAsset = nqSweptH ? "NQ" : "ES";
                 const setupKey = `BEARISH-SMT-${latestQ.key}-${failureAsset}`;
                 
+                const smtDesc = `Bearish SMT: ${sweeperAsset} swept high (${prevQ[sweeperAsset.toLowerCase()].high.toFixed(2)}), but ${failureAsset} failed.`;
+                if (!detectedSMTs.includes(smtDesc)) {
+                    detectedSMTs.push(smtDesc);
+                }
+                
                 if (!mem.alertedSetupKeys.includes(setupKey)) {
                     mem.alertedSetupKeys.push(setupKey);
                     memoryUpdated = true;
@@ -737,6 +765,19 @@ async function checkAutomatedScans() {
                 }
             }
         }
+        
+        // Save latest scan results in memory
+        mem.latestScanResults = {
+            lastScanTime: moment().tz("America/New_York").format("YYYY-MM-DD HH:mm:ss EST"),
+            latestQuarter: latestQ.key,
+            currentPrices: {
+                ES: lastES ? lastES.close : null,
+                NQ: lastNQ ? lastNQ.close : null
+            },
+            detectedSMTs: detectedSMTs.length > 0 ? detectedSMTs : ["None"]
+        };
+        memoryUpdated = true;
+        
         if (memoryUpdated) {
             saveMemory(mem);
         }
