@@ -8,8 +8,56 @@
   ],
   "customAlerts": [],
   "activeTasks": {
-    "scan15mSSMT": false,
     "scanDailyGap": false,
-    "customScanText": ""
-  }
+    "customScanText": "",
+    "scanMonthlyCycle": false,
+    "scanWeeklyCycle": false,
+    "scanDailyCycle": false,
+    "scan90mCycle": false
+  },
+  "latestScanResults": {
+    "lastScanTime": "2026-08-10 13:49:53 13T",
+    "monthly": {
+      "currentWeek": "2026-26-33",
+      "currentPrices": {
+        "ES": 7775.25,
+        "NQ": 29771.5
+      },
+      "detectedSMTs": [
+        "None"
+      ]
+    },
+    "weekly": {
+      "currentDay": "2026-08-10",
+      "currentPrices": {
+        "ES": 7775.25,
+        "NQ": 29771.5
+      },
+      "detectedSMTs": [
+        "Bearish Daily SMT: ES swept high (7786.25), but NQ failed.",
+        "Bullish Daily SMT: NQ swept low (29788.50), but ES failed."
+      ]
+    },
+    "daily": {
+      "currentSession": "2026-08-10-NY_PM",
+      "currentPrices": {
+        "ES": 7775,
+        "NQ": 29771
+      },
+      "detectedSMTs": [
+        "Bullish Session SMT: ES swept low (7769.75), but NQ failed."
+      ]
+    },
+    "90m": {
+      "currentQuarter": "2026-08-10-NY_PM-Q2",
+      "currentPrices": {
+        "ES": 7775,
+        "NQ": 29771
+      },
+      "detectedSMTs": [
+        "None"
+      ]
+    }
+  },
+  "alertedSetupKeys": []
 }

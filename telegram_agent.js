@@ -31,7 +31,10 @@ if (!fs.existsSync(MEMORY_FILE)) {
         lessons: [], // Rules/corrections taught by the user
         customAlerts: [], // Price alert levels set from phone
         activeTasks: {
-            scan15mSSMT: false,
+            scanMonthlyCycle: false,
+            scanWeeklyCycle: false,
+            scanDailyCycle: false,
+            scan90mCycle: false,
             scanDailyGap: false,
             customScanText: ""
         }
@@ -80,7 +83,17 @@ function compileKnowledgeBase() {
 
 // Load Memory data
 function getMemory() {
-    return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
+    const mem = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
+    if (!mem.activeTasks) mem.activeTasks = {};
+    if (mem.activeTasks.scanMonthlyCycle === undefined) mem.activeTasks.scanMonthlyCycle = false;
+    if (mem.activeTasks.scanWeeklyCycle === undefined) mem.activeTasks.scanWeeklyCycle = false;
+    if (mem.activeTasks.scanDailyCycle === undefined) mem.activeTasks.scanDailyCycle = false;
+    if (mem.activeTasks.scan90mCycle === undefined) mem.activeTasks.scan90mCycle = false;
+    if (mem.activeTasks.scan15mSSMT !== undefined) {
+        mem.activeTasks.scanDailyCycle = mem.activeTasks.scan15mSSMT;
+        delete mem.activeTasks.scan15mSSMT;
+    }
+    return mem;
 }
 
 // Save Memory data
@@ -254,15 +267,31 @@ async function askGemini(userMessage) {
     }
     
     // Fetch latest scan findings from memory
-    const esPriceStr = (mem.latestScanResults && mem.latestScanResults.currentPrices && mem.latestScanResults.currentPrices.ES) ? mem.latestScanResults.currentPrices.ES.toFixed(2) : "Unknown";
-    const nqPriceStr = (mem.latestScanResults && mem.latestScanResults.currentPrices && mem.latestScanResults.currentPrices.NQ) ? mem.latestScanResults.currentPrices.NQ.toFixed(2) : "Unknown";
-    
-    const scanResultsStr = mem.latestScanResults ? `
-- Last Scan Time: ${mem.latestScanResults.lastScanTime}
-- Latest Session Quarter: ${mem.latestScanResults.latestQuarter}
-- Current Prices: ES: ${esPriceStr}, NQ: ${nqPriceStr}
-- Active Quarter SMT Sweeps: ${JSON.stringify(mem.latestScanResults.detectedSMTs)}
-` : "No SMT/FVG scan results available yet.";
+    let scanResultsStr = "No SMT/FVG scan results available yet.";
+    if (mem.latestScanResults) {
+        scanResultsStr = `Last Scan Time: ${mem.latestScanResults.lastScanTime}\n\n`;
+        
+        if (mem.latestScanResults.monthly) {
+            scanResultsStr += `1. MONTHLY CYCLE (4H TF, Weekly SMT):\n` +
+                `- Current Week: ${mem.latestScanResults.monthly.currentWeek}\n` +
+                `- Active Sweeps: ${JSON.stringify(mem.latestScanResults.monthly.detectedSMTs)}\n\n`;
+        }
+        if (mem.latestScanResults.weekly) {
+            scanResultsStr += `2. WEEKLY CYCLE (1H TF, Daily SMT):\n` +
+                `- Current Day: ${mem.latestScanResults.weekly.currentDay}\n` +
+                `- Active Sweeps: ${JSON.stringify(mem.latestScanResults.weekly.detectedSMTs)}\n\n`;
+        }
+        if (mem.latestScanResults.daily) {
+            scanResultsStr += `3. DAILY CYCLE (15M TF, Session SMT):\n` +
+                `- Current Session: ${mem.latestScanResults.daily.currentSession}\n` +
+                `- Active Sweeps: ${JSON.stringify(mem.latestScanResults.daily.detectedSMTs)}\n\n`;
+        }
+        if (mem.latestScanResults['90m']) {
+            scanResultsStr += `4. 90-MINUTE CYCLE (5M TF, Quarter SMT):\n` +
+                `- Current Quarter: ${mem.latestScanResults['90m'].currentQuarter}\n` +
+                `- Active Sweeps: ${JSON.stringify(mem.latestScanResults['90m'].detectedSMTs)}\n`;
+        }
+    }
     
     const systemPrompt = `You are the personal Trading Assistant co-pilot for the user. You have been loaded with their private trading notes, blueprints, and rules. 
 Your brain contains the complete core content of Jacob Speculates mentorship (Videos 1-22).
@@ -331,23 +360,75 @@ async function parseAndSetTask(text) {
     const mem = getMemory();
     const lowercase = text.toLowerCase();
     
-    // Check if user is asking to scan for 15M SMT / SSMT
-    const hasSmtKeyword = lowercase.includes("15m smt") || lowercase.includes("15m ssmt") || 
-                          lowercase.includes("15-minute smt") || lowercase.includes("15-minute ssmt") || 
-                          lowercase.includes("15 minute smt") || lowercase.includes("15 minute ssmt");
-    if (hasSmtKeyword && (lowercase.includes("scan") || lowercase.includes("monitor") || lowercase.includes("inform"))) {
-        mem.activeTasks.scan15mSSMT = true;
-        mem.alertedSetupKeys = []; // Reset alerted keys so we alert on currently active sweeps immediately!
-        saveMemory(mem);
-        return "✅ Scanning Task Activated: I will scan ES, NQ, and YM for 15-Minute SMT setups and push alerts immediately to your phone.";
-    }
-    
-    // Check if user is clearing scans
+    // Check if user is deactivating all scans
     if (lowercase.includes("stop scan") || lowercase.includes("clear scan")) {
-        mem.activeTasks.scan15mSSMT = false;
+        mem.activeTasks.scanMonthlyCycle = false;
+        mem.activeTasks.scanWeeklyCycle = false;
+        mem.activeTasks.scanDailyCycle = false;
+        mem.activeTasks.scan90mCycle = false;
         mem.activeTasks.scanDailyGap = false;
         saveMemory(mem);
         return "⏹️ All custom scanning tasks deactivated.";
+    }
+
+    // Check Monthly Cycle activation/deactivation
+    if ((lowercase.includes("monthly cycle") || lowercase.includes("monthly smt") || lowercase.includes("4h smt") || lowercase.includes("4h ssmt")) && (lowercase.includes("scan") || lowercase.includes("monitor") || lowercase.includes("inform"))) {
+        mem.activeTasks.scanMonthlyCycle = true;
+        mem.alertedSetupKeys = [];
+        saveMemory(mem);
+        return "✅ Monthly Cycle Scanning Activated: I will monitor the 4H chart for Weekly SMT sweeps and push alerts.";
+    }
+    if ((lowercase.includes("monthly cycle") || lowercase.includes("monthly smt") || lowercase.includes("4h smt") || lowercase.includes("4h ssmt")) && (lowercase.includes("stop") || lowercase.includes("clear") || lowercase.includes("deactivate"))) {
+        mem.activeTasks.scanMonthlyCycle = false;
+        saveMemory(mem);
+        return "⏹️ Monthly Cycle SMT scan deactivated.";
+    }
+
+    // Check Weekly Cycle activation/deactivation
+    if ((lowercase.includes("weekly cycle") || lowercase.includes("weekly smt") || lowercase.includes("1h smt") || lowercase.includes("1h ssmt")) && (lowercase.includes("scan") || lowercase.includes("monitor") || lowercase.includes("inform"))) {
+        mem.activeTasks.scanWeeklyCycle = true;
+        mem.alertedSetupKeys = [];
+        saveMemory(mem);
+        return "✅ Weekly Cycle Scanning Activated: I will monitor the 1H chart for Daily SMT sweeps and push alerts.";
+    }
+    if ((lowercase.includes("weekly cycle") || lowercase.includes("weekly smt") || lowercase.includes("1h smt") || lowercase.includes("1h ssmt")) && (lowercase.includes("stop") || lowercase.includes("clear") || lowercase.includes("deactivate"))) {
+        mem.activeTasks.scanWeeklyCycle = false;
+        saveMemory(mem);
+        return "⏹️ Weekly Cycle SMT scan deactivated.";
+    }
+
+    // Check Daily Cycle activation/deactivation (15M TF, Session SMT)
+    const hasDailySmtKeyword = lowercase.includes("daily cycle") || lowercase.includes("daily smt") ||
+                               lowercase.includes("15m smt") || lowercase.includes("15m ssmt") || 
+                               lowercase.includes("15-minute smt") || lowercase.includes("15-minute ssmt") || 
+                               lowercase.includes("15 minute smt") || lowercase.includes("15 minute ssmt");
+    if (hasDailySmtKeyword && (lowercase.includes("scan") || lowercase.includes("monitor") || lowercase.includes("inform"))) {
+        mem.activeTasks.scanDailyCycle = true;
+        mem.alertedSetupKeys = [];
+        saveMemory(mem);
+        return "✅ Daily Cycle Scanning Activated: I will monitor the 15M chart for Session-to-Session SMT sweeps and push alerts.";
+    }
+    if (hasDailySmtKeyword && (lowercase.includes("stop") || lowercase.includes("clear") || lowercase.includes("deactivate"))) {
+        mem.activeTasks.scanDailyCycle = false;
+        saveMemory(mem);
+        return "⏹️ Daily Cycle SMT scan deactivated.";
+    }
+
+    // Check 90-Minute Cycle activation/deactivation (5M TF, Quarter SMT)
+    const has90mSmtKeyword = lowercase.includes("90m cycle") || lowercase.includes("90m smt") ||
+                             lowercase.includes("90-minute") || lowercase.includes("90 minute") ||
+                             lowercase.includes("5m smt") || lowercase.includes("5m ssmt") ||
+                             lowercase.includes("5-minute") || lowercase.includes("5 minute");
+    if (has90mSmtKeyword && (lowercase.includes("scan") || lowercase.includes("monitor") || lowercase.includes("inform"))) {
+        mem.activeTasks.scan90mCycle = true;
+        mem.alertedSetupKeys = [];
+        saveMemory(mem);
+        return "✅ 90-Minute Cycle Scanning Activated: I will monitor the 5M chart for Quarter-to-Quarter SMT sweeps and push alerts.";
+    }
+    if (has90mSmtKeyword && (lowercase.includes("stop") || lowercase.includes("clear") || lowercase.includes("deactivate"))) {
+        mem.activeTasks.scan90mCycle = false;
+        saveMemory(mem);
+        return "⏹️ 90-Minute Cycle SMT scan deactivated.";
     }
     
     // Check for daily gap alerts
@@ -425,7 +506,10 @@ async function generateScannerStatus() {
     
     const mem = getMemory();
     report += `🛡️ *Active Custom Tasks*:\n`;
-    report += `- 15M SSMT Scan: ${mem.activeTasks.scan15mSSMT ? "✅ ON" : "❌ OFF"}\n`;
+    report += `- Monthly Cycle Scan (4H): ${mem.activeTasks.scanMonthlyCycle ? "✅ ON" : "❌ OFF"}\n`;
+    report += `- Weekly Cycle Scan (1H): ${mem.activeTasks.scanWeeklyCycle ? "✅ ON" : "❌ OFF"}\n`;
+    report += `- Daily Cycle Scan (15M): ${mem.activeTasks.scanDailyCycle ? "✅ ON" : "❌ OFF"}\n`;
+    report += `- 90M Cycle Scan (5M): ${mem.activeTasks.scan90mCycle ? "✅ ON" : "❌ OFF"}\n`;
     report += `- Daily Gap Scan: ${mem.activeTasks.scanDailyGap ? "✅ ON" : "❌ OFF"}\n\n`;
     
     if (mem.customAlerts.length > 0) {
@@ -624,165 +708,454 @@ function getPreviousSession(session) {
     return null;
 }
 
-// Scan and alert for automated SMT sweeps during session opens (comparing against previous session highs/lows)
-async function checkAutomatedScans() {
+// Scan and alert for all 4 SMT cycles: Monthly (4H TF), Weekly (1H TF), Daily (15M TF), 90M (5M TF)
+async function runCycleScans() {
     const mem = getMemory();
+    const yf = new yahooFinance();
+    const now = new Date();
     
-    try {
-        console.log("[SCANNER] Running automated SMT scans...");
-        const yf = new yahooFinance();
-        const period2 = new Date();
-        const startToday = new Date(Date.now() - 24 * 60 * 60 * 1000); // last 24h
-        
-        // Fetch 15M charts for today's SMT scan
-        const es15mRes = await yf.chart('ES=F', { period1: startToday, period2, interval: '15m' });
-        const nq15mRes = await yf.chart('NQ=F', { period1: startToday, period2, interval: '15m' });
-        
-        if (!es15mRes.quotes || !nq15mRes.quotes) return;
-        
-        const es15m = parseQuotes(es15mRes.quotes);
-        const nq15m = parseQuotes(nq15mRes.quotes);
-        
-        const lastES = es15m[es15m.length - 1];
-        const lastNQ = nq15m[nq15m.length - 1];
-        
-        if (!lastES || !lastNQ) return;
-        
-        const currentSessionType = getSession(lastES.timestamp);
-        if (!currentSessionType) return;
-        
-        const prevSessionType = getPreviousSession(currentSessionType);
-        
-        const todayStr = moment().tz("America/New_York").format("YYYY-MM-DD");
-        const yesterdayStr = moment().subtract(1, 'day').tz("America/New_York").format("YYYY-MM-DD");
-        
-        let prevSessionHighES = 0;
-        let prevSessionLowES = 999999;
-        let prevSessionHighNQ = 0;
-        let prevSessionLowNQ = 999999;
-        let prevSessionFound = false;
-        
-        const currentSessionBars = [];
-        
-        const nqMap = new Map();
-        nq15m.forEach(q => nqMap.set(moment(q.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm"), q));
-        
-        for (const es of es15m) {
-            const dateStr = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm");
-            const nq = nqMap.get(dateStr);
-            if (!nq) continue;
-            
-            const barSession = getSession(es.timestamp);
-            const barDate = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD");
-            
-            const isPrevSessionDate = (currentSessionType === 'LONDON' && prevSessionType === 'ASIA')
-                ? (barDate === yesterdayStr || barDate === todayStr)
-                : (barDate === todayStr || barDate === yesterdayStr);
-            
-            if (barSession === prevSessionType && isPrevSessionDate) {
-                prevSessionFound = true;
-                prevSessionHighES = Math.max(prevSessionHighES, es.high);
-                prevSessionLowES = Math.min(prevSessionLowES, es.low);
-                prevSessionHighNQ = Math.max(prevSessionHighNQ, nq.high);
-                prevSessionLowNQ = Math.min(prevSessionLowNQ, nq.low);
-            }
-            
-            if (barSession === currentSessionType && barDate === todayStr) {
-                currentSessionBars.push({ date: dateStr, timestamp: es.timestamp, es, nq });
-            }
-        }
-        
-        if (!prevSessionFound || currentSessionBars.length === 0) {
-            console.log(`[SCANNER] Prev session [${prevSessionType}] not found or current session empty.`);
-            return;
-        }
-        
-        if (!mem.alertedSetupKeys) {
-            mem.alertedSetupKeys = [];
-        }
-        
-        let memoryUpdated = false;
-        const detectedSMTs = [];
-        const currentSessionKey = `${todayStr}-${currentSessionType}`;
-        
-        for (const bar of currentSessionBars) {
-            const esSweptL = bar.es.low < prevSessionLowES;
-            const nqSweptL = bar.nq.low < prevSessionLowNQ;
-            const bullishSMT = (esSweptL && !nqSweptL) || (nqSweptL && !esSweptL);
-            
-            if (bullishSMT) {
-                const failureAsset = nqSweptL ? "ES" : "NQ";
-                const sweeperAsset = nqSweptL ? "NQ" : "ES";
-                const setupKey = `BULLISH-SMT-${currentSessionKey}-${failureAsset}`;
-                
-                const smtDesc = `Bullish SMT: ${sweeperAsset} swept low (${(sweeperAsset === 'NQ' ? prevSessionLowNQ : prevSessionLowES).toFixed(2)}), but ${failureAsset} failed.`;
-                if (!detectedSMTs.includes(smtDesc)) {
-                    detectedSMTs.push(smtDesc);
-                }
-                
-                if (!mem.alertedSetupKeys.includes(setupKey)) {
-                    const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
-                        `📈 *Setup*: Bullish 15M Session SMT\n` +
-                        `📅 *Session*: \`${currentSessionKey}\`\n` +
-                        `⚡ *Divergence*: ${sweeperAsset} swept previous session low (${(sweeperAsset === 'NQ' ? prevSessionLowNQ : prevSessionLowES).toFixed(2)}), but ${failureAsset} respected low.\n\n` +
-                        `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **15M Reversion Level** of Candle 2!`;
-                    
-                    if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
-                        mem.alertedSetupKeys.push(setupKey);
-                        memoryUpdated = true;
-                        await sendTelegram(alertMsg);
-                    }
-                }
-            }
-            
-            const esSweptH = bar.es.high > prevSessionHighES;
-            const nqSweptH = bar.nq.high > prevSessionHighNQ;
-            const bearishSMT = (esSweptH && !nqSweptH) || (nqSweptH && !esSweptH);
-            
-            if (bearishSMT) {
-                const failureAsset = nqSweptH ? "ES" : "NQ";
-                const sweeperAsset = nqSweptH ? "NQ" : "ES";
-                const setupKey = `BEARISH-SMT-${currentSessionKey}-${failureAsset}`;
-                
-                const smtDesc = `Bearish SMT: ${sweeperAsset} swept high (${(sweeperAsset === 'ES' ? prevSessionHighES : prevSessionHighNQ).toFixed(2)}), but ${failureAsset} failed.`;
-                if (!detectedSMTs.includes(smtDesc)) {
-                    detectedSMTs.push(smtDesc);
-                }
-                
-                if (!mem.alertedSetupKeys.includes(setupKey)) {
-                    const alertMsg = `🚨 *15M SMT SWEEP DETECTED!* 🚨\n\n` +
-                        `📉 *Setup*: Bearish 15M Session SMT\n` +
-                        `📅 *Session*: \`${currentSessionKey}\`\n` +
-                        `⚡ *Divergence*: ${sweeperAsset} swept previous session high (${(sweeperAsset === 'ES' ? prevSessionHighES : prevSessionHighNQ).toFixed(2)}), but ${failureAsset} respected high.\n\n` +
-                        `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **15M Reversion Level** of Candle 2!`;
-                    
-                    if (mem.activeTasks && mem.activeTasks.scan15mSSMT) {
-                        mem.alertedSetupKeys.push(setupKey);
-                        memoryUpdated = true;
-                        await sendTelegram(alertMsg);
-                    }
-                }
-            }
-        }
-        
-        // Save latest scan results in memory
-        mem.latestScanResults = {
-            lastScanTime: moment().tz("America/New_York").format("YYYY-MM-DD HH:mm:ss EST"),
-            latestQuarter: currentSessionKey,
-            currentPrices: {
-                ES: lastES ? lastES.close : null,
-                NQ: lastNQ ? lastNQ.close : null
-            },
-            detectedSMTs: detectedSMTs.length > 0 ? detectedSMTs : ["None"]
-        };
-        memoryUpdated = true;
-        
-        if (memoryUpdated) {
-            saveMemory(mem);
-        }
-    } catch (err) {
-        console.error("[SCANNER] Automated check failed:", err.message);
+    let memoryUpdated = false;
+    if (!mem.latestScanResults) {
+        mem.latestScanResults = {};
     }
+    
+    mem.latestScanResults.lastScanTime = moment().tz("America/New_York").format("YYYY-MM-DD HH:mm:ss EST");
+    
+    if (!mem.alertedSetupKeys) {
+        mem.alertedSetupKeys = [];
+    }
+
+    // 1. MONTHLY & WEEKLY CYCLES (1H chart data)
+    try {
+        console.log("[SCANNER] Running Monthly and Weekly SMT scans (1H)...");
+        const start30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const esRes = await yf.chart('ES=F', { period1: start30d, period2: now, interval: '1h' });
+        const nqRes = await yf.chart('NQ=F', { period1: start30d, period2: now, interval: '1h' });
+        
+        if (esRes.quotes && nqRes.quotes) {
+            const es1h = parseQuotes(esRes.quotes);
+            const nq1h = parseQuotes(nqRes.quotes);
+            
+            const nqMap = new Map();
+            nq1h.forEach(q => nqMap.set(moment(q.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm"), q));
+            
+            const aligned1h = [];
+            es1h.forEach(es => {
+                const dateStr = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm");
+                const nq = nqMap.get(dateStr);
+                if (nq) aligned1h.push({ date: dateStr, timestamp: es.timestamp, es, nq });
+            });
+            
+            const lastES1h = es1h[es1h.length - 1];
+            const lastNQ1h = nq1h[nq1h.length - 1];
+            
+            // --- Monthly Cycle: Weekly SMT (4H TF equivalent, using 1H data) ---
+            const weeksMap = new Map();
+            aligned1h.forEach(bar => {
+                const weekKey = moment(bar.timestamp).tz("America/New_York").format("YYYY-GG-WW");
+                if (!weeksMap.has(weekKey)) {
+                    weeksMap.set(weekKey, {
+                        key: weekKey,
+                        timestamp: bar.timestamp,
+                        highES: 0,
+                        lowES: 999999,
+                        highNQ: 0,
+                        lowNQ: 999999,
+                        bars: []
+                    });
+                }
+                const wObj = weeksMap.get(weekKey);
+                wObj.bars.push(bar);
+                wObj.highES = Math.max(wObj.highES, bar.es.high);
+                wObj.lowES = Math.min(wObj.lowES, bar.es.low);
+                wObj.highNQ = Math.max(wObj.highNQ, bar.nq.high);
+                wObj.lowNQ = Math.min(wObj.lowNQ, bar.nq.low);
+            });
+            
+            const sortedWeeks = Array.from(weeksMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+            if (sortedWeeks.length >= 2) {
+                const prevW = sortedWeeks[sortedWeeks.length - 2];
+                const latestW = sortedWeeks[sortedWeeks.length - 1];
+                const monthlyDetected = [];
+                
+                for (const bar of latestW.bars) {
+                    const esSweptL = bar.es.low < prevW.lowES;
+                    const nqSweptL = bar.nq.low < prevW.lowNQ;
+                    if ((esSweptL && !nqSweptL) || (nqSweptL && !esSweptL)) {
+                        const failureAsset = nqSweptL ? "ES" : "NQ";
+                        const sweeperAsset = nqSweptL ? "NQ" : "ES";
+                        const setupKey = `MONTHLY-BULLISH-SMT-${latestW.key}-${failureAsset}`;
+                        const smtDesc = `Bullish Weekly SMT: ${sweeperAsset} swept low (${(sweeperAsset==='NQ'?prevW.lowNQ:prevW.lowES).toFixed(2)}), but ${failureAsset} failed.`;
+                        if (!monthlyDetected.includes(smtDesc)) monthlyDetected.push(smtDesc);
+                        
+                        if (!mem.alertedSetupKeys.includes(setupKey)) {
+                            const alertMsg = `🚨 *MONTHLY CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                `📈 *Setup*: Bullish Weekly SMT (4H TF)\n` +
+                                `📅 *Week*: \`${latestW.key}\`\n` +
+                                `⚡ *Divergence*: ${sweeperAsset} swept previous week low (${(sweeperAsset==='NQ'?prevW.lowNQ:prevW.lowES).toFixed(2)}), but ${failureAsset} respected low.\n\n` +
+                                `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **4H Reversion Level** of Candle 2!`;
+                            if (mem.activeTasks && mem.activeTasks.scanMonthlyCycle) {
+                                mem.alertedSetupKeys.push(setupKey);
+                                memoryUpdated = true;
+                                await sendTelegram(alertMsg);
+                            }
+                        }
+                    }
+                    
+                    const esSweptH = bar.es.high > prevW.highES;
+                    const nqSweptH = bar.nq.high > prevW.highNQ;
+                    if ((esSweptH && !nqSweptH) || (nqSweptH && !esSweptH)) {
+                        const failureAsset = nqSweptH ? "ES" : "NQ";
+                        const sweeperAsset = nqSweptH ? "NQ" : "ES";
+                        const setupKey = `MONTHLY-BEARISH-SMT-${latestW.key}-${failureAsset}`;
+                        const smtDesc = `Bearish Weekly SMT: ${sweeperAsset} swept high (${(sweeperAsset==='NQ'?prevW.highNQ:prevW.highES).toFixed(2)}), but ${failureAsset} failed.`;
+                        if (!monthlyDetected.includes(smtDesc)) monthlyDetected.push(smtDesc);
+                        
+                        if (!mem.alertedSetupKeys.includes(setupKey)) {
+                            const alertMsg = `🚨 *MONTHLY CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                `📉 *Setup*: Bearish Weekly SMT (4H TF)\n` +
+                                `📅 *Week*: \`${latestW.key}\`\n` +
+                                `⚡ *Divergence*: ${sweeperAsset} swept previous week high (${(sweeperAsset==='NQ'?prevW.highNQ:prevW.highES).toFixed(2)}), but ${failureAsset} respected high.\n\n` +
+                                `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **4H Reversion Level** of Candle 2!`;
+                            if (mem.activeTasks && mem.activeTasks.scanMonthlyCycle) {
+                                mem.alertedSetupKeys.push(setupKey);
+                                memoryUpdated = true;
+                                await sendTelegram(alertMsg);
+                            }
+                        }
+                    }
+                }
+                
+                mem.latestScanResults.monthly = {
+                    currentWeek: latestW.key,
+                    currentPrices: { ES: lastES1h ? lastES1h.close : null, NQ: lastNQ1h ? lastNQ1h.close : null },
+                    detectedSMTs: monthlyDetected.length > 0 ? monthlyDetected : ["None"]
+                };
+            }
+            
+            // --- Weekly Cycle: Daily SMT (1H TF, using last 7 days of 1H data) ---
+            const start7d = Date.now() - 7 * 24 * 60 * 60 * 1000;
+            const daysMap = new Map();
+            aligned1h.forEach(bar => {
+                if (bar.timestamp >= start7d) {
+                    const dateKey = moment(bar.timestamp).tz("America/New_York").format("YYYY-MM-DD");
+                    if (!daysMap.has(dateKey)) {
+                        daysMap.set(dateKey, {
+                            key: dateKey,
+                            timestamp: bar.timestamp,
+                            highES: 0,
+                            lowES: 999999,
+                            highNQ: 0,
+                            lowNQ: 999999,
+                            bars: []
+                        });
+                    }
+                    const dObj = daysMap.get(dateKey);
+                    dObj.bars.push(bar);
+                    dObj.highES = Math.max(dObj.highES, bar.es.high);
+                    dObj.lowES = Math.min(dObj.lowES, bar.es.low);
+                    dObj.highNQ = Math.max(dObj.highNQ, bar.nq.high);
+                    dObj.lowNQ = Math.min(dObj.lowNQ, bar.nq.low);
+                }
+            });
+            
+            const sortedDays = Array.from(daysMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+            if (sortedDays.length >= 2) {
+                const prevD = sortedDays[sortedDays.length - 2];
+                const latestD = sortedDays[sortedDays.length - 1];
+                const weeklyDetected = [];
+                
+                for (const bar of latestD.bars) {
+                    const esSweptL = bar.es.low < prevD.lowES;
+                    const nqSweptL = bar.nq.low < prevD.lowNQ;
+                    if ((esSweptL && !nqSweptL) || (nqSweptL && !esSweptL)) {
+                        const failureAsset = nqSweptL ? "ES" : "NQ";
+                        const sweeperAsset = nqSweptL ? "NQ" : "ES";
+                        const setupKey = `WEEKLY-BULLISH-SMT-${latestD.key}-${failureAsset}`;
+                        const smtDesc = `Bullish Daily SMT: ${sweeperAsset} swept low (${(sweeperAsset==='NQ'?prevD.lowNQ:prevD.lowES).toFixed(2)}), but ${failureAsset} failed.`;
+                        if (!weeklyDetected.includes(smtDesc)) weeklyDetected.push(smtDesc);
+                        
+                        if (!mem.alertedSetupKeys.includes(setupKey)) {
+                            const alertMsg = `🚨 *WEEKLY CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                `📈 *Setup*: Bullish Daily SMT (1H TF)\n` +
+                                `📅 *Day*: \`${latestD.key}\`\n` +
+                                `⚡ *Divergence*: ${sweeperAsset} swept previous day low (${(sweeperAsset==='NQ'?prevD.lowNQ:prevD.lowES).toFixed(2)}), but ${failureAsset} respected low.\n\n` +
+                                `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **1H Reversion Level** of Candle 2!`;
+                            if (mem.activeTasks && mem.activeTasks.scanWeeklyCycle) {
+                                mem.alertedSetupKeys.push(setupKey);
+                                memoryUpdated = true;
+                                await sendTelegram(alertMsg);
+                            }
+                        }
+                    }
+                    
+                    const esSweptH = bar.es.high > prevD.highES;
+                    const nqSweptH = bar.nq.high > prevD.highNQ;
+                    if ((esSweptH && !nqSweptH) || (nqSweptH && !esSweptH)) {
+                        const failureAsset = nqSweptH ? "ES" : "NQ";
+                        const sweeperAsset = nqSweptH ? "NQ" : "ES";
+                        const setupKey = `WEEKLY-BEARISH-SMT-${latestD.key}-${failureAsset}`;
+                        const smtDesc = `Bearish Daily SMT: ${sweeperAsset} swept high (${(sweeperAsset==='NQ'?prevD.highNQ:prevD.highES).toFixed(2)}), but ${failureAsset} failed.`;
+                        if (!weeklyDetected.includes(smtDesc)) weeklyDetected.push(smtDesc);
+                        
+                        if (!mem.alertedSetupKeys.includes(setupKey)) {
+                            const alertMsg = `🚨 *WEEKLY CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                `📉 *Setup*: Bearish Daily SMT (1H TF)\n` +
+                                `📅 *Day*: \`${latestD.key}\`\n` +
+                                `⚡ *Divergence*: ${sweeperAsset} swept previous day high (${(sweeperAsset==='NQ'?prevD.highNQ:prevD.highES).toFixed(2)}), but ${failureAsset} respected high.\n\n` +
+                                `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **1H Reversion Level** of Candle 2!`;
+                            if (mem.activeTasks && mem.activeTasks.scanWeeklyCycle) {
+                                mem.alertedSetupKeys.push(setupKey);
+                                memoryUpdated = true;
+                                await sendTelegram(alertMsg);
+                            }
+                        }
+                    }
+                }
+                
+                mem.latestScanResults.weekly = {
+                    currentDay: latestD.key,
+                    currentPrices: { ES: lastES1h ? lastES1h.close : null, NQ: lastNQ1h ? lastNQ1h.close : null },
+                    detectedSMTs: weeklyDetected.length > 0 ? weeklyDetected : ["None"]
+                };
+            }
+        }
+    } catch (e) {
+        console.error("[SCANNER] Monthly/Weekly check failed:", e.message);
+    }
+
+    // 2. DAILY CYCLE (15M chart data, Session SMT)
+    try {
+        console.log("[SCANNER] Running Daily Cycle SMT scans (15M)...");
+        const start24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const esRes = await yf.chart('ES=F', { period1: start24h, period2: now, interval: '15m' });
+        const nqRes = await yf.chart('NQ=F', { period1: start24h, period2: now, interval: '15m' });
+        
+        if (esRes.quotes && nqRes.quotes) {
+            const es15m = parseQuotes(esRes.quotes);
+            const nq15m = parseQuotes(nqRes.quotes);
+            
+            const lastES15m = es15m[es15m.length - 1];
+            const lastNQ15m = nq15m[nq15m.length - 1];
+            
+            if (lastES15m && lastNQ15m) {
+                const currentSessionType = getSession(lastES15m.timestamp);
+                if (currentSessionType) {
+                    const prevSessionType = getPreviousSession(currentSessionType);
+                    const todayStr = moment().tz("America/New_York").format("YYYY-MM-DD");
+                    const yesterdayStr = moment().subtract(1, 'day').tz("America/New_York").format("YYYY-MM-DD");
+                    
+                    let prevSessionHighES = 0;
+                    let prevSessionLowES = 999999;
+                    let prevSessionHighNQ = 0;
+                    let prevSessionLowNQ = 999999;
+                    let prevSessionFound = false;
+                    
+                    const currentSessionBars = [];
+                    const nqMap = new Map();
+                    nq15m.forEach(q => nqMap.set(moment(q.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm"), q));
+                    
+                    for (const es of es15m) {
+                        const dateStr = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm");
+                        const nq = nqMap.get(dateStr);
+                        if (!nq) continue;
+                        
+                        const barSession = getSession(es.timestamp);
+                        const barDate = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD");
+                        
+                        const isPrevSessionDate = (currentSessionType === 'LONDON' && prevSessionType === 'ASIA')
+                            ? (barDate === yesterdayStr || barDate === todayStr)
+                            : (barDate === todayStr || barDate === yesterdayStr);
+                        
+                        if (barSession === prevSessionType && isPrevSessionDate) {
+                            prevSessionFound = true;
+                            prevSessionHighES = Math.max(prevSessionHighES, es.high);
+                            prevSessionLowES = Math.min(prevSessionLowES, es.low);
+                            prevSessionHighNQ = Math.max(prevSessionHighNQ, nq.high);
+                            prevSessionLowNQ = Math.min(prevSessionLowNQ, nq.low);
+                        }
+                        
+                        if (barSession === currentSessionType && barDate === todayStr) {
+                            currentSessionBars.push({ es, nq, date: dateStr });
+                        }
+                    }
+                    
+                    if (prevSessionFound && currentSessionBars.length > 0) {
+                        const dailyDetected = [];
+                        const currentSessionKey = `${todayStr}-${currentSessionType}`;
+                        
+                        for (const bar of currentSessionBars) {
+                            const esSweptL = bar.es.low < prevSessionLowES;
+                            const nqSweptL = bar.nq.low < prevSessionLowNQ;
+                            if ((esSweptL && !nqSweptL) || (nqSweptL && !esSweptL)) {
+                                const failureAsset = nqSweptL ? "ES" : "NQ";
+                                const sweeperAsset = nqSweptL ? "NQ" : "ES";
+                                const setupKey = `DAILY-BULLISH-SMT-${currentSessionKey}-${failureAsset}`;
+                                const smtDesc = `Bullish Session SMT: ${sweeperAsset} swept low (${(sweeperAsset==='NQ'?prevSessionLowNQ:prevSessionLowES).toFixed(2)}), but ${failureAsset} failed.`;
+                                if (!dailyDetected.includes(smtDesc)) dailyDetected.push(smtDesc);
+                                
+                                if (!mem.alertedSetupKeys.includes(setupKey)) {
+                                    const alertMsg = `🚨 *DAILY CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                        `📈 *Setup*: Bullish 15M Session SMT\n` +
+                                        `📅 *Session*: \`${currentSessionKey}\`\n` +
+                                        `⚡ *Divergence*: ${sweeperAsset} swept previous session low (${(sweeperAsset==='NQ'?prevSessionLowNQ:prevSessionLowES).toFixed(2)}), but ${failureAsset} respected low.\n\n` +
+                                        `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **15M Reversion Level** of Candle 2!`;
+                                    if (mem.activeTasks && mem.activeTasks.scanDailyCycle) {
+                                        mem.alertedSetupKeys.push(setupKey);
+                                        memoryUpdated = true;
+                                        await sendTelegram(alertMsg);
+                                    }
+                                }
+                            }
+                            
+                            const esSweptH = bar.es.high > prevSessionHighES;
+                            const nqSweptH = bar.nq.high > prevSessionHighNQ;
+                            if ((esSweptH && !nqSweptH) || (nqSweptH && !esSweptH)) {
+                                const failureAsset = nqSweptH ? "ES" : "NQ";
+                                const sweeperAsset = nqSweptH ? "NQ" : "ES";
+                                const setupKey = `DAILY-BEARISH-SMT-${currentSessionKey}-${failureAsset}`;
+                                const smtDesc = `Bearish Session SMT: ${sweeperAsset} swept high (${(sweeperAsset==='ES'?prevSessionHighES:prevSessionHighNQ).toFixed(2)}), but ${failureAsset} failed.`;
+                                if (!dailyDetected.includes(smtDesc)) dailyDetected.push(smtDesc);
+                                
+                                if (!mem.alertedSetupKeys.includes(setupKey)) {
+                                    const alertMsg = `🚨 *DAILY CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                        `📉 *Setup*: Bearish 15M Session SMT\n` +
+                                        `📅 *Session*: \`${currentSessionKey}\`\n` +
+                                        `⚡ *Divergence*: ${sweeperAsset} swept previous session high (${(sweeperAsset==='ES'?prevSessionHighES:prevSessionHighNQ).toFixed(2)}), but ${failureAsset} respected high.\n\n` +
+                                        `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **15M Reversion Level** of Candle 2!`;
+                                    if (mem.activeTasks && mem.activeTasks.scanDailyCycle) {
+                                        mem.alertedSetupKeys.push(setupKey);
+                                        memoryUpdated = true;
+                                        await sendTelegram(alertMsg);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        mem.latestScanResults.daily = {
+                            currentSession: currentSessionKey,
+                            currentPrices: { ES: lastES15m ? lastES15m.close : null, NQ: lastNQ15m ? lastNQ15m.close : null },
+                            detectedSMTs: dailyDetected.length > 0 ? dailyDetected : ["None"]
+                        };
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error("[SCANNER] Daily Cycle check failed:", e.message);
+    }
+
+    // 3. 90-MINUTE CYCLE (5M chart data, Quarter SMT)
+    try {
+        console.log("[SCANNER] Running 90M Cycle SMT scans (5M)...");
+        const start24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const esRes = await yf.chart('ES=F', { period1: start24h, period2: now, interval: '5m' });
+        const nqRes = await yf.chart('NQ=F', { period1: start24h, period2: now, interval: '5m' });
+        
+        if (esRes.quotes && nqRes.quotes) {
+            const es5m = parseQuotes(esRes.quotes);
+            const nq5m = parseQuotes(nqRes.quotes);
+            
+            const lastES5m = es5m[es5m.length - 1];
+            const lastNQ5m = nq5m[nq5m.length - 1];
+            
+            const nqMap = new Map();
+            nq5m.forEach(q => nqMap.set(moment(q.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm"), q));
+            
+            const quartersMap = new Map();
+            es5m.forEach(es => {
+                const dateStr = moment(es.timestamp).tz("America/New_York").format("YYYY-MM-DD HH:mm");
+                const nq = nqMap.get(dateStr);
+                if (nq) {
+                    const qr = getInstitutionalQuarter(es.timestamp);
+                    if (qr) {
+                        if (!quartersMap.has(qr.key)) {
+                            quartersMap.set(qr.key, {
+                                key: qr.key,
+                                timestamp: es.timestamp,
+                                highES: 0,
+                                lowES: 999999,
+                                highNQ: 0,
+                                lowNQ: 999999,
+                                bars: []
+                            });
+                        }
+                        const qObj = quartersMap.get(qr.key);
+                        qObj.bars.push({ es, nq });
+                        qObj.highES = Math.max(qObj.highES, es.high);
+                        qObj.lowES = Math.min(qObj.lowES, es.low);
+                        qObj.highNQ = Math.max(qObj.highNQ, nq.high);
+                        qObj.lowNQ = Math.min(qObj.lowNQ, nq.low);
+                    }
+                }
+            });
+            
+            const sortedQuarters = Array.from(quartersMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+            if (sortedQuarters.length >= 2) {
+                const prevQ = sortedQuarters[sortedQuarters.length - 2];
+                const latestQ = sortedQuarters[sortedQuarters.length - 1];
+                const q90mDetected = [];
+                
+                for (const bar of latestQ.bars) {
+                    const esSweptL = bar.es.low < prevQ.lowES;
+                    const nqSweptL = bar.nq.low < prevQ.lowNQ;
+                    if ((esSweptL && !nqSweptL) || (nqSweptL && !esSweptL)) {
+                        const failureAsset = nqSweptL ? "ES" : "NQ";
+                        const sweeperAsset = nqSweptL ? "NQ" : "ES";
+                        const setupKey = `90M-BULLISH-SMT-${latestQ.key}-${failureAsset}`;
+                        const smtDesc = `Bullish Quarter SMT: ${sweeperAsset} swept low (${(sweeperAsset==='NQ'?prevQ.lowNQ:prevQ.lowES).toFixed(2)}), but ${failureAsset} failed.`;
+                        if (!q90mDetected.includes(smtDesc)) q90mDetected.push(smtDesc);
+                        
+                        if (!mem.alertedSetupKeys.includes(setupKey)) {
+                            const alertMsg = `🚨 *90-MINUTE CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                `📈 *Setup*: Bullish 5M Quarter SMT\n` +
+                                `📅 *Quarter*: \`${latestQ.key}\`\n` +
+                                `⚡ *Divergence*: ${sweeperAsset} swept previous quarter low (${(sweeperAsset==='NQ'?prevQ.lowNQ:prevQ.lowES).toFixed(2)}), but ${failureAsset} respected low.\n\n` +
+                                `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (stronger). Look for limit buy entries at the **5M Reversion Level** of Candle 2!`;
+                            if (mem.activeTasks && mem.activeTasks.scan90mCycle) {
+                                mem.alertedSetupKeys.push(setupKey);
+                                memoryUpdated = true;
+                                await sendTelegram(alertMsg);
+                            }
+                        }
+                    }
+                    
+                    const esSweptH = bar.es.high > prevQ.highES;
+                    const nqSweptH = bar.nq.high > prevQ.highNQ;
+                    if ((esSweptH && !nqSweptH) || (nqSweptH && !esSweptH)) {
+                        const failureAsset = nqSweptH ? "ES" : "NQ";
+                        const sweeperAsset = nqSweptH ? "NQ" : "ES";
+                        const setupKey = `90M-BEARISH-SMT-${latestQ.key}-${failureAsset}`;
+                        const smtDesc = `Bearish Quarter SMT: ${sweeperAsset} swept high (${(sweeperAsset==='NQ'?prevQ.highNQ:prevQ.highES).toFixed(2)}), but ${failureAsset} failed.`;
+                        if (!q90mDetected.includes(smtDesc)) q90mDetected.push(smtDesc);
+                        
+                        if (!mem.alertedSetupKeys.includes(setupKey)) {
+                            const alertMsg = `🚨 *90-MINUTE CYCLE SMT SWEEP DETECTED!* 🚨\n\n` +
+                                `📉 *Setup*: Bearish 5M Quarter SMT\n` +
+                                `📅 *Quarter*: \`${latestQ.key}\`\n` +
+                                `⚡ *Divergence*: ${sweeperAsset} swept previous quarter high (${(sweeperAsset==='NQ'?prevQ.highNQ:prevQ.highES).toFixed(2)}), but ${failureAsset} respected high.\n\n` +
+                                `🎯 *Strategy Action*: ${failureAsset} is the **Failure Swing Asset** (weaker). Look for limit sell entries at the **5M Reversion Level** of Candle 2!`;
+                            if (mem.activeTasks && mem.activeTasks.scan90mCycle) {
+                                mem.alertedSetupKeys.push(setupKey);
+                                memoryUpdated = true;
+                                await sendTelegram(alertMsg);
+                            }
+                        }
+                    }
+                }
+                
+                mem.latestScanResults['90m'] = {
+                    currentQuarter: latestQ.key,
+                    currentPrices: { ES: lastES5m ? lastES5m.close : null, NQ: lastNQ5m ? lastNQ5m.close : null },
+                    detectedSMTs: q90mDetected.length > 0 ? q90mDetected : ["None"]
+                };
+            }
+        }
+    } catch (e) {
+        console.error("[SCANNER] 90M Cycle check failed:", e.message);
+    }
+    
+    saveMemory(mem);
 }
 
 // Main background scheduler
@@ -790,8 +1163,8 @@ async function runAlertsCheck() {
     // 1. Run user-defined custom price level alerts
     await checkCustomAlerts();
     
-    // 2. Run automated SMT sweep scanner
-    await checkAutomatedScans();
+    // 2. Run automated SMT sweep cycles scanner
+    await runCycleScans();
 }
 
 // Background poll loops
@@ -807,7 +1180,8 @@ module.exports = {
     sendTelegram,
     askGemini,
     fetchEconomicCalendar,
-    compileKnowledgeBase
+    compileKnowledgeBase,
+    runCycleScans
 };
 
 // If run directly, start polling and bind to port for Render health checks
